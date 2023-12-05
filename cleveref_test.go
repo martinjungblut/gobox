@@ -32,75 +32,85 @@ func TestImmutable_Use(t *testing.T) {
 	}
 }
 
-func TestImmutable_Forbid_Pointer(t *testing.T) {
-	recovered := false
-	var currentPanic cleveref.CleverefPanic
+func TestImmutable_Swap(t *testing.T) {
+	first := cleveref.NewImmutable(10)
+	second := first.Swap(func(i int) int {
+		return i * 2
+	})
 
-	defer func() {
-		cleveref.Recover(recover(), func(p cleveref.CleverefPanic) {
-			recovered = true
-			currentPanic = p
-		})
+	if !first.IsDead() {
+		t.Error("First immutable should be dead.")
+	}
 
-		if !recovered {
-			t.Error("Should have panicked/recovered.")
-		}
-
-		if currentPanic != cleveref.PANIC_UNEXPECTED_POINTER {
-			t.Error("Incorrect panic type.")
-		}
-	}()
-
-	i := 10
-	cleveref.NewImmutable[*int](&i)
+	counter := 0
+	second.Use(func(i int) {
+		counter += i
+	})
+	if counter != 20 {
+		t.Error("Second immutable didn't contain the expected value.")
+	}
 }
 
-func TestImmutable_Forbid_DoublePointer(t *testing.T) {
-	recovered := false
-	var currentPanic cleveref.CleverefPanic
+func TestImmutable_Dead_Use(t *testing.T) {
+	called := false
 
-	defer func() {
-		cleveref.Recover(recover(), func(p cleveref.CleverefPanic) {
-			recovered = true
-			currentPanic = p
-		})
+	i := 10
+	immut := cleveref.NewImmutable[*int](&i)
+	immut.Use(func(_ *int) {
+		called = true
+	})
 
-		if !recovered {
-			t.Error("Should have panicked/recovered.")
-		}
+	if called {
+		t.Error("Dead immutables should never allow Use().")
+	}
+}
 
-		if currentPanic != cleveref.PANIC_UNEXPECTED_POINTER {
-			t.Error("Incorrect panic type.")
-		}
-	}()
+func TestImmutable_Dead_Swap(t *testing.T) {
+	called := false
 
+	i := 10
+	first := cleveref.NewImmutable[*int](&i)
+	second := first.Swap(func(_ *int) *int {
+		called = true
+		return nil
+	})
+
+	if called {
+		t.Error("Dead immutables should never allow Swap().")
+	}
+
+	if !second.IsDead() {
+		t.Error("Swap() on a dead immutable should always return a dead immutable.")
+	}
+}
+
+func TestImmutable_Dead_Pointer(t *testing.T) {
+	i := 10
+
+	immut := cleveref.NewImmutable[*int](&i)
+	if !immut.IsDead() {
+		t.Error("Immutable should be dead.")
+	}
+}
+
+func TestImmutable_Dead_DoublePointer(t *testing.T) {
 	a := 10
 	b := &a
 	c := &b
-	cleveref.NewImmutable[**int](c)
+
+	immut := cleveref.NewImmutable[**int](c)
+	if !immut.IsDead() {
+		t.Error("Immutable should be dead.")
+	}
 }
 
-func TestImmutable_Forbid_Map(t *testing.T) {
-	recovered := false
-	var currentPanic cleveref.CleverefPanic
-
-	defer func() {
-		cleveref.Recover(recover(), func(p cleveref.CleverefPanic) {
-			recovered = true
-			currentPanic = p
-		})
-
-		if !recovered {
-			t.Error("Should have panicked/recovered.")
-		}
-
-		if currentPanic != cleveref.PANIC_UNEXPECTED_MAP {
-			t.Error("Incorrect panic type.")
-		}
-	}()
-
+func TestImmutable_Dead_Map(t *testing.T) {
 	var m map[int]int
-	cleveref.NewImmutable(m)
+
+	immut := cleveref.NewImmutable(m)
+	if !immut.IsDead() {
+		t.Error("Immutable should be dead.")
+	}
 }
 
 func TestImmutable_Immutability_Slice(t *testing.T) {
@@ -180,11 +190,11 @@ func TestImmutable_Immutability_StructMethod(t *testing.T) {
 }
 
 func TestImmutable_Immutability_Bypass(t *testing.T) {
-	// nested pointers bypass immutability, since pointers themselves
+	// Nested pointers bypass immutability, since pointers themselves
 	// are mutable.
-	// even if Immutable makes a copy, we're making a copy of a
+	// Even if Immutable makes a copy, we're making a copy of a
 	// pointer to the original memory location.
-	// therefore the copy CAN modify the original contents.
+	// Therefore the copy CAN modify the original contents.
 
 	a, b := 10, 20
 	owned := SymbolTable{Value: a, Pointer: &a}
@@ -195,11 +205,9 @@ func TestImmutable_Immutability_Bypass(t *testing.T) {
 		t.StructPointer.Value = b
 		t.StructPointer.Pointer = &b
 	})
-
 	if owner.StructPointer.Value == a {
 		t.Error("Nested table did not mutate. It should have.")
 	}
-
 	if owner.StructPointer.Pointer == &a {
 		t.Error("Nested table did not mutate. It should have.")
 	}
@@ -207,7 +215,6 @@ func TestImmutable_Immutability_Bypass(t *testing.T) {
 	immut.Use(func(t SymbolTable) {
 		*t.Pointer = 50
 	})
-
 	if a != 50 {
 		t.Error("Integer did not mutate. It should have.")
 	}
