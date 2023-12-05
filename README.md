@@ -79,7 +79,7 @@ func main() {
 
 This being Go, there are some gotchas:
 
-- Structs containing pointers: if a struct contains a pointer, even if the struct itself is wrapped as an `Immutable`, any copíes of said struct would still hold a copy of a pointer that references the same memory location as the original struct. Therefore, they cannot be feasibly immutable in Go. But you can always use `Immutable` inside structs!
+- Structs containing pointers: if a struct contains a pointer, even if the struct itself is wrapped as an `Immutable`, any copies of said struct would still hold a copy of a pointer that references the same memory location as the original struct. Therefore, they cannot be feasibly immutable in Go. But you can always use `Immutable` inside structs!
 
 #### Example #1: Use()
 
@@ -110,7 +110,7 @@ The original `Immutable` will be dead after that point. Dead immutables may no l
 // create an immutable int
 i := NewImmutable(5)
 
-// and Use() it
+// and Swap() it
 k := i.Swap(func(x int) {
 	// k will be Immutable[int](10)
 	return x * 2
