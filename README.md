@@ -63,6 +63,65 @@ func main() {
 }
 ```
 
+There are various way to do copies in Go, as a side effect of simply trying to get types to match so that the program actually _compiles_.
+
+And this creates a maintenance burden. Behold:
+
+```go
+package main
+
+import "fmt"
+
+type Counter struct {
+	n int
+}
+
+func (this *Counter) Inc() {
+	this.n++
+}
+
+func (this Counter) Display() {
+	fmt.Printf("n = %d\n", this.n)
+}
+
+type CounterHolder struct {
+	C *Counter
+}
+
+func (this CounterHolder) Inc() {
+	this.C.Inc()
+}
+
+func A(flag int, target *Counter) {
+	if flag == 0 {
+		target.Inc()
+	} else if flag == 1 {
+		// oops, made a copy when we dereferenced the pointer
+		copy := *target
+		copy.Inc()
+	} else {
+		B(CounterHolder{C: target})
+	}
+}
+
+func B(target CounterHolder) {
+	target.Inc()
+}
+
+func main() {
+	c := Counter{}
+
+	A(0, &c)
+	c.Display() // mutates, prints 1
+
+	A(1, &c)
+	c.Display() // doesn't mutate, prints 1
+
+	A(2, &c)
+	c.Display() // mutates, prints 2
+}
+```
+
 #### The plan
 
 > Let's go, let's suck the suckage out of Go.
@@ -88,7 +147,7 @@ It also imposes an API to access values, and values are always accessed by copyi
 
 - All Go primitive types: bool, string, all number types, bytes and runes.
 - Structs.
-- Slices.
+- Slices. Althought slices are mutable, when we pass a slice to a function (which we must do, when using `Immutable`), the copied reference cannot change the original slice's _view_ of its designated memory area. So even though slices are mutable in Go, when we shim them through `Immutable`, in practice, they become immutable. Nice!
 
 `Immutable` does not work with:
 
@@ -100,7 +159,7 @@ It also imposes an API to access values, and values are always accessed by copyi
 
 This being Go, there are some gotchas:
 
-- Structs containing pointers: if a struct contains a pointer, even if the struct itself is wrapped as an `Immutable`, any copies of said struct would still hold a copy of a pointer that references the same memory location as the original struct. Therefore, they cannot be feasibly immutable in Go. But you can always use `Immutable` inside structs!
+- Structs containing pointers: if a struct contains a pointer, even if the struct itself is wrapped as an `Immutable`, any copies of said struct would still hold a copy of a pointer that references the same memory location as the original struct. Therefore, they cannot be feasibly immutable in Go. But you can always use `Immutable` inside structs. At least now you have a proper type to `grep` for.
 
 #### Example #1: Use()
 
