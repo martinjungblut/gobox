@@ -78,6 +78,12 @@ That's it for now. Stay tuned, kids!
 
 #### Immutable
 
+`Immutable` is a type that prevents us from doing those struct copies implicitly.
+
+It forces us not to use pointers, maps, and other mutables types.
+
+It also imposes an API to access values, and values are always accessed by copying, as pointers are not allowed.
+
 `Immutable` works with:
 
 - All Go primitive types: bool, string, all number types, bytes and runes.
