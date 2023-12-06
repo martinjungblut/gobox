@@ -150,6 +150,10 @@ func (this Counter) Inc() {
 
 Well, now no mutation will ever create any meaningful state change. As we're always mutating copies, we'll just print 0 three times.
 
+**In a nutshell, Go requires us to be mindful of: struct members' types, function/method type definitions, call sites and receiver type definitions.**
+
+And because programs tend to evolve over time to interweave types based on specific needs, it's very often hard to determine when we're mutating a copy or not, particularly with deeply nested call stacks.
+
 #### The plan
 
 > Let's go, let's suck the suckage out of Go.
