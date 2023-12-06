@@ -1,6 +1,6 @@
 ## cleveref
 
-### Clever References for the Go programming language
+### clever/smart references for the Go programming language
 
 ----
 
@@ -121,6 +121,34 @@ func main() {
 	c.Display() // mutates, prints 2
 }
 ```
+
+**What if we had forgotten to declare C as a pointer?**
+
+```go
+type CounterHolder struct {
+	C Counter
+}
+```
+
+Well, then the code wouldn't compile, rightfully so, because of this line: `B(CounterHolder{C: target})`
+
+```
+./prog.go:33:22: cannot use target (variable of type *Counter) as Counter value in struct literal
+```
+
+You may be tempted to dereference the pointer to satisfy the type checker, but now you just made a copy, by mistake: `B(CounterHolder{C: *target})`
+
+That last mutation (that printed 2) will never be triggered.
+
+**What if we had forgotten to declare `this` as a pointer, for the `Counter.Inc()` method?**
+
+```go
+func (this Counter) Inc() {
+	this.n++
+}
+```
+
+Well, now no mutation will ever create any meaningful state change. As we're always mutating copies, we'll just print 0 three times.
 
 #### The plan
 
