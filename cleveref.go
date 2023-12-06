@@ -7,9 +7,9 @@ import (
 type Immutable[T any] struct {
 	// value is a *T as copying a pointer is cheaper than copying a
 	// potentially large T.
-	// Every time an Immutable is passed along the call stack, it
-	// should be passed as a copy.  But we'll always be copying a
-	// pointer, not an actual T.  This is why we hold a *T, not a T.
+	// Every time an Immutable is passed along the call stack, it will
+	// be passed as a copy.  But we'll always be copying a pointer,
+	// not an actual T.  This is why we hold a *T, not a T.
 	value *T
 }
 
