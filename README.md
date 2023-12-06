@@ -1,6 +1,8 @@
-### cleveref
+## cleveref
 
-#### Clever References for the Go programming language
+### Clever References for the Go programming language
+
+----
 
 This library is part of the GoExt project. It aims at making Go suck less. Go sucks like a vacuum cleaner.
 Don't get me wrong, Go is a great tool. I've been writing it for 8 years. It's good. But it sucks.
@@ -61,7 +63,20 @@ func main() {
 }
 ```
 
-#### Introduction
+#### The plan
+
+> Let's go, let's suck the suckage out of Go.
+
+To suck the suckage out of Go, we'll introduce some special types.
+These special types will make our lives easier. Hopefully.
+
+This is the list of special types currently provided by `cleveref`:
+
+- `Immutable`.
+
+That's it for now. Stay tuned, kids!
+
+#### Immutable
 
 `Immutable` works with:
 
