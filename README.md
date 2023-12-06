@@ -104,22 +104,20 @@ i.Use(func(x int) {
 
 Swap() allows an `Immutable` to produce another `Immutable`. You may then replace the original reference.
 
-The original `Immutable` will be dead after that point. Dead immutables may no longer call `Use()` or `Swap()`!
-
 ```go
 // create an immutable int
 i := NewImmutable(5)
 
 // and Swap() it
-k := i.Swap(func(x int) {
+k := i.Swap(func(x int) int {
 	// k will be Immutable[int](10)
 	return x * 2
-}) 
+})
 
-// i is dead now!
-i.IsDead() == true
+i.Use(func(x int) {
+	fmt.Printf("x will be 5: %d\n", x)
+})
 
-// i.Use() and i.Swap() will do nothing, but we can still use k, since it's alive
 k.Use(func(x int) {
 	fmt.Printf("x will be 10: %d\n", x)
 })

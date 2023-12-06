@@ -38,15 +38,19 @@ func TestImmutable_Swap(t *testing.T) {
 		return i * 2
 	})
 
-	if !first.IsDead() {
-		t.Error("First immutable should be dead.")
+	firstCounter := 0
+	first.Use(func(i int) {
+		firstCounter += i
+	})
+	if firstCounter != 10 {
+		t.Error("First immutable didn't contain the expected value.")
 	}
 
-	counter := 0
+	secondCounter := 0
 	second.Use(func(i int) {
-		counter += i
+		secondCounter += i
 	})
-	if counter != 20 {
+	if secondCounter != 20 {
 		t.Error("Second immutable didn't contain the expected value.")
 	}
 }
@@ -66,10 +70,10 @@ func TestImmutable_Dead_Use(t *testing.T) {
 }
 
 func TestImmutable_Dead_Swap(t *testing.T) {
-	called := false
-
 	i := 10
 	first := cleveref.NewImmutable[*int](&i)
+
+	called := false
 	second := first.Swap(func(_ *int) *int {
 		called = true
 		return nil
@@ -80,7 +84,7 @@ func TestImmutable_Dead_Swap(t *testing.T) {
 	}
 
 	if !second.IsDead() {
-		t.Error("Swap() on a dead immutable should always return a dead immutable.")
+		t.Error("Calling Swap() on dead immutables should always return dead immutables.")
 	}
 }
 

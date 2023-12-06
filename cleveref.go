@@ -42,13 +42,11 @@ func (i Immutable[T]) IsDead() bool {
 	return i.value == nil
 }
 
-func (i *Immutable[T]) Swap(continuation func(T) T) Immutable[T] {
+func (i Immutable[T]) Swap(continuation func(T) T) Immutable[T] {
 	if i.IsDead() {
-		return *i
+		return i
 	}
 
 	newvalue := continuation(*i.value)
-	i.value = nil
-
 	return NewImmutable(newvalue)
 }
