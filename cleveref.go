@@ -2,6 +2,7 @@ package cleveref
 
 import (
 	"reflect"
+	"sync"
 )
 
 type Immutable[T any] struct {
@@ -49,4 +50,37 @@ func (i Immutable[T]) Swap(continuation func(T) T) Immutable[T] {
 
 	newvalue := continuation(*i.value)
 	return NewImmutable(newvalue)
+}
+
+type Atom[T any] struct {
+	mutex *sync.Mutex
+	value *T
+}
+
+func NewAtom[T any](value *T) Atom[T] {
+	mutex := sync.Mutex{}
+
+	dead := Atom[T]{value: nil, mutex: &mutex}
+	alive := Atom[T]{value: value, mutex: &mutex}
+
+	// prevent double pointers
+	rvalue := reflect.ValueOf(value)
+	if rvalue.Kind() == reflect.Ptr && rvalue.Elem().Kind() == reflect.Ptr {
+		return dead
+	}
+
+	return alive
+}
+
+func (a Atom[T]) Use(continuation func(*T)) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+
+	if !a.IsDead() {
+		continuation(a.value)
+	}
+}
+
+func (a Atom[T]) IsDead() bool {
+	return a.value == nil
 }

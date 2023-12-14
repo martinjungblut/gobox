@@ -1,6 +1,9 @@
 package cleveref_test
 
 import (
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 
 	"cleveref"
@@ -222,4 +225,138 @@ func TestImmutable_Immutability_Bypass(t *testing.T) {
 	if a != 50 {
 		t.Error("Integer did not mutate. It should have.")
 	}
+}
+
+func TestAtom_DoublePointer(t *testing.T) {
+	a := 10
+	b := &a
+	c := &b
+	atom := cleveref.NewAtom(c)
+
+	if !atom.IsDead() {
+		t.Error("Atom should be dead.")
+	}
+
+	// Use() should never invoke its continuation if the Atom is dead
+	called := false
+	atom.Use(func(v **int) {
+		called = true
+	})
+	if called {
+		t.Error("Use() should not have called its continuation.")
+	}
+}
+
+func TestAtom_Pointer(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		called := false
+
+		atom := cleveref.NewAtom(&i)
+		atom.Use(func(value *int) {
+			called = true
+
+			if *value != i {
+				t.Errorf("Value should've been: %d", i)
+			}
+		})
+
+		if !called {
+			t.Error("Use() did not call its continuation.")
+		}
+	}
+}
+
+type Counter struct {
+	Value int
+}
+
+func (this *Counter) RefInc() {
+	this.Value++
+}
+
+func (this Counter) Inc() {
+	this.Value++
+}
+
+func FuncInc(atom cleveref.Atom[Counter]) {
+	atom.Use(func(counter *Counter) {
+		counter.RefInc()
+	})
+}
+
+func TestAtom_Use(t *testing.T) {
+	// establish truths
+	counter := Counter{Value: 0}
+
+	counter.RefInc()
+	if counter.Value != 1 {
+		t.Error("RefInc() performed no mutation.")
+	}
+
+	counter.Inc()
+	if counter.Value != 1 {
+		t.Error("Inc() performed a mutation.")
+	}
+
+	// Call methods directly inside a Use() block
+	atom := cleveref.NewAtom(&counter)
+	atom.Use(func(c *Counter) {
+		c.RefInc()
+		if c.Value != 2 {
+			t.Error("RefInc() performed no mutation.")
+		}
+
+		c.Inc()
+		if c.Value != 2 {
+			t.Error("Inc() performed a mutation.")
+		}
+	})
+
+	// Call methods inside another function that received the Atom as
+	// a copy
+	FuncInc(atom)
+	atom.Use(func(c *Counter) {
+		if c.Value != 3 {
+			t.Error("FuncInc() performed no mutation.")
+		}
+	})
+}
+
+func TestAtom_IsAtomic(t *testing.T) {
+	maxprocs := runtime.NumCPU() + 1
+
+	fmt.Printf("Setting GOMAXPROCS to %d.\n", maxprocs)
+	runtime.GOMAXPROCS(maxprocs)
+
+	cycles := 1000000
+
+	i := 0
+	atom := cleveref.NewAtom(&i)
+
+	var wg sync.WaitGroup
+
+	for i := 1; i <= cycles; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			atom.Use(func(number *int) {
+				*number++
+				// *number = *number + 1
+			})
+		}()
+	}
+
+	wg.Wait()
+
+	atom.Use(func(number *int) {
+		if *number != cycles {
+			t.Errorf("Atom is not atomic. Value was %d, should have been %d.", *number, cycles)
+		}
+	})
+}
+
+func TestAtom_Hijack(t *testing.T) {
+
 }
