@@ -343,7 +343,6 @@ func TestAtom_IsAtomic(t *testing.T) {
 
 			atom.Use(func(number *int) {
 				*number++
-				// *number = *number + 1
 			})
 		}()
 	}
@@ -357,6 +356,31 @@ func TestAtom_IsAtomic(t *testing.T) {
 	})
 }
 
-func TestAtom_Hijack(t *testing.T) {
+func TestAtom_Swap(t *testing.T) {
+	k := 10
+	atom := cleveref.NewAtom(&k)
 
+	// Swap() directly on the 'atom' symbol. Mutates.
+	atom.Swap(func(value *int) *int {
+		y := *value
+		y++
+		return &y
+	})
+
+	func(copy cleveref.Atom[int]) {
+		// Swap() on a local copy named 'copy'. Mutates.
+		copy.Swap(func(value *int) *int {
+			y := *value
+			y++
+			return &y
+		})
+	}(atom)
+
+	// We can see the original 'atom' was mutated here. Controlled
+	// shared state.
+	atom.Use(func(value *int) {
+		if *value != 12 {
+			t.Error("Swap() performed no mutations.")
+		}
+	})
 }

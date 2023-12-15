@@ -5,8 +5,9 @@ import (
 	"sync"
 )
 
+// Immutable
 type Immutable[T any] struct {
-	// value is a *T as copying a pointer is cheaper than copying a
+	// 'value' is a *T as copying a pointer is cheaper than copying a
 	// potentially large T.
 	// Every time an Immutable is passed along the call stack, it will
 	// be passed as a copy.  But we'll always be copying a pointer,
@@ -52,35 +53,51 @@ func (i Immutable[T]) Swap(continuation func(T) T) Immutable[T] {
 	return NewImmutable(newvalue)
 }
 
+// Atom is a shared, atomic reference. Copies of an Atom always refer
+// to the same Atom, so a modification to any copy implies a state
+// mutation across all copies.
 type Atom[T any] struct {
 	mutex *sync.Mutex
-	value *T
+	// 'value' must be a **T so that we can modify it from Atom
+	// copies.
+	value **T
 }
 
+// Type *T enforces a pointer must be used, during compile-time.
 func NewAtom[T any](value *T) Atom[T] {
 	mutex := sync.Mutex{}
 
-	dead := Atom[T]{value: nil, mutex: &mutex}
-	alive := Atom[T]{value: value, mutex: &mutex}
+	instance := Atom[T]{value: &value, mutex: &mutex}
 
-	// prevent double pointers
+	// Prevent double pointers during runtime.
 	rvalue := reflect.ValueOf(value)
 	if rvalue.Kind() == reflect.Ptr && rvalue.Elem().Kind() == reflect.Ptr {
-		return dead
+		// Die.
+		*instance.value = nil
 	}
 
-	return alive
+	return instance
 }
 
-func (a Atom[T]) Use(continuation func(*T)) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
+func (this Atom[T]) Use(handler func(*T)) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
 
-	if !a.IsDead() {
-		continuation(a.value)
+	if !this.IsDead() {
+		handler(*this.value)
 	}
 }
 
-func (a Atom[T]) IsDead() bool {
-	return a.value == nil
+func (this Atom[T]) Swap(handler func(*T) *T) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
+	if !this.IsDead() {
+		newvalue := handler(*this.value)
+		*this.value = newvalue
+	}
+}
+
+func (this Atom[T]) IsDead() bool {
+	return *this.value == nil
 }
