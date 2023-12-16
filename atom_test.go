@@ -1,4 +1,4 @@
-package box
+package gobox
 
 import (
 	"runtime"
