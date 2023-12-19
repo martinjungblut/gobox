@@ -37,7 +37,7 @@ func Test_DoublePointer_Dies(t *testing.T) {
 	a := 10
 	b := &a
 	c := &b
-	atom := NewAtom(c)
+	atom := New(c)
 
 	if !atom.IsDead() {
 		t.Error("Atom should be dead.")
@@ -46,7 +46,7 @@ func Test_DoublePointer_Dies(t *testing.T) {
 
 func Test_Use_And_Swap_Alive(t *testing.T) {
 	for a := 0; a < 10; a++ {
-		atom := NewAtom(&a)
+		atom := New(&a)
 
 		called := false
 		result := atom.Use(func(ptr *int) {
@@ -85,7 +85,7 @@ func Test_Use_And_Swap_Dead(t *testing.T) {
 	a := 0
 	b := &a
 	c := &b
-	atom := NewAtom(c)
+	atom := New(c)
 
 	called := false
 	result := atom.Use(func(ptr **int) {
@@ -113,7 +113,7 @@ func Test_Use_And_Swap_Dead(t *testing.T) {
 
 func Test_Swap_Nil_Pointer_Kills_Atom(t *testing.T) {
 	a := 10
-	atom := NewAtom(&a)
+	atom := New(&a)
 
 	atom.Swap(func(ptr *int) *int {
 		return nil
@@ -144,7 +144,7 @@ func Test_Mutation_Assumptions(t *testing.T) {
 
 func Test_Mutation(t *testing.T) {
 	counter := Counter{Value: 0}
-	atom := NewAtom(&counter)
+	atom := New(&counter)
 
 	// Call methods directly inside a Use() block. Regular Go
 	// semantics apply.
@@ -224,7 +224,7 @@ func Test_Atomicity_And_Nested_And_IsLocked(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	a := 0
-	atom := NewAtom(&a)
+	atom := New(&a)
 
 	for i := 1; i <= cycles; i++ {
 		wg.Add(1)
@@ -290,7 +290,7 @@ func Test_Atomicity_And_Nested_And_IsLocked(t *testing.T) {
 
 func Test_Nesting_And_Deadlocks(t *testing.T) {
 	a := 0
-	atom := NewAtom(&a)
+	atom := New(&a)
 
 	resultFirstUse := false
 	resultSecondUse := false

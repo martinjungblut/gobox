@@ -19,7 +19,7 @@ type Atom[T any] struct {
 }
 
 // Type *T enforces a pointer must be used, during compile-time.
-func NewAtom[T any](value *T) Atom[T] {
+func New[T any](value *T) Atom[T] {
 	mutex := sync.Mutex{}
 	lockedByUse := false
 	lockedBySwap := false
