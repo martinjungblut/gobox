@@ -1,9 +1,11 @@
-package gobox
+package atom
 
 import (
+	"os"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Counter is used by the test suite to observe state mutations.
@@ -42,13 +44,12 @@ func Test_DoublePointer_Dies(t *testing.T) {
 	}
 }
 
-func Test_Use_Swap_Alive(t *testing.T) {
+func Test_Use_And_Swap_Alive(t *testing.T) {
 	for a := 0; a < 10; a++ {
-		called := false
-
 		atom := NewAtom(&a)
 
-		atom.Use(func(ptr *int) {
+		called := false
+		result := atom.Use(func(ptr *int) {
 			called = true
 
 			if *ptr != a {
@@ -58,9 +59,12 @@ func Test_Use_Swap_Alive(t *testing.T) {
 		if !called {
 			t.Error("Use() did not call its handler.")
 		}
+		if !result {
+			t.Error("Use() did not return true.")
+		}
 
 		called = false
-		atom.Swap(func(ptr *int) *int {
+		result = atom.Swap(func(ptr *int) *int {
 			called = true
 
 			if *ptr != a {
@@ -71,36 +75,60 @@ func Test_Use_Swap_Alive(t *testing.T) {
 		if !called {
 			t.Error("Swap() did not call its handler.")
 		}
+		if !result {
+			t.Error("Swap() did not return true.")
+		}
 	}
 }
 
-func Test_Use_Swap_Dead(t *testing.T) {
+func Test_Use_And_Swap_Dead(t *testing.T) {
 	a := 0
 	b := &a
 	c := &b
 	atom := NewAtom(c)
 
 	called := false
-	atom.Use(func(ptr **int) {
+	result := atom.Use(func(ptr **int) {
 		called = true
 	})
 	if called {
 		t.Error("Use() called its handler, even though the Atom was dead.")
 	}
+	if result {
+		t.Error("Use() did not return false.")
+	}
 
 	called = false
-	atom.Swap(func(ptr **int) **int {
+	result = atom.Swap(func(ptr **int) **int {
 		called = true
 		return ptr
 	})
 	if called {
 		t.Error("Swap() called its handler, even though the Atom was dead.")
 	}
+	if result {
+		t.Error("Swap() did not return false.")
+	}
+}
+
+func Test_Swap_Nil_Pointer_Kills_Atom(t *testing.T) {
+	a := 10
+	atom := NewAtom(&a)
+
+	atom.Swap(func(ptr *int) *int {
+		return nil
+	})
+
+	if !atom.IsDead() {
+		t.Error("Atom should be dead.")
+	}
 }
 
 func Test_Mutation_Assumptions(t *testing.T) {
 	// Observe some truths. IncByReference() should mutate,
-	// IncByValue() should not.
+	// IncByValue() should not. These are truths are implied by the
+	// semantics of Go, but the test simply makes them explicitly
+	// verifiable.
 	counter := Counter{Value: 0}
 
 	counter.IncByReference()
@@ -182,20 +210,7 @@ func Test_Mutation(t *testing.T) {
 	})
 }
 
-func Test_Swap_Nil_Pointer_Kills_Atom(t *testing.T) {
-	a := 10
-	atom := NewAtom(&a)
-
-	atom.Swap(func(ptr *int) *int {
-		return nil
-	})
-
-	if !atom.IsDead() {
-		t.Error("Atom should be dead.")
-	}
-}
-
-func Test_Atomicity(t *testing.T) {
+func Test_Atomicity_And_Nested_And_IsLocked(t *testing.T) {
 	// We set MAXPROCS to NumCPU() + 1 as that ensures we're not
 	// running in single-threaded mode. Therefore, even on a
 	// single-core machine, forcing our runtime to use 2 OS threads
@@ -204,30 +219,64 @@ func Test_Atomicity(t *testing.T) {
 	runtime.GOMAXPROCS(maxprocs)
 
 	cycles := 1000000
-	// 'expectedValue' is cycles * 2 because we're checking both Use()
-	// and Swap() during each iteration, so each iteration adds 2, not
-	// 1.
-	expectedValue := cycles * 2
+	expectedValue := 0
+	expectedValueLock := sync.Mutex{}
+	wg := sync.WaitGroup{}
 
-	i := 0
-	atom := NewAtom(&i)
+	a := 0
+	atom := NewAtom(&a)
 
-	var wg sync.WaitGroup
 	for i := 1; i <= cycles; i++ {
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
 
-			atom.Use(func(ptr *int) {
+			successful := atom.Use(func(ptr *int) {
 				*ptr++
-			})
 
-			atom.Swap(func(ptr *int) *int {
+				// Ensure Atom is always locked when inside Use() handler.
+				if !atom.IsLocked() {
+					t.Error("Atom should be locked when inside Use() handler.")
+				}
+
+				nested := atom.Nest()
+				successful := nested.Use(func(nptr *int) {
+					*nptr++
+
+					// Ensure nested Atom is always locked when inside Use() handler.
+					if !nested.IsLocked() {
+						t.Error("Nested atom should be locked when inside Use() handler.")
+					}
+				})
+				if successful {
+					expectedValueLock.Lock()
+					expectedValue++
+					expectedValueLock.Unlock()
+				}
+			})
+			if successful {
+				expectedValueLock.Lock()
+				expectedValue++
+				expectedValueLock.Unlock()
+			}
+
+			successful = atom.Swap(func(ptr *int) *int {
 				y := *ptr
 				y++
+
+				// Ensure Atom is always locked when inside Swap() handler.
+				if !atom.IsLocked() {
+					t.Error("Atom should be locked when inside Swap() handler.")
+				}
+
 				return &y
 			})
+			if successful {
+				expectedValueLock.Lock()
+				expectedValue++
+				expectedValueLock.Unlock()
+			}
 		}()
 	}
 	wg.Wait()
@@ -237,4 +286,83 @@ func Test_Atomicity(t *testing.T) {
 			t.Errorf("Atom is not atomic. Final value was %d, should have been %d.", *ptr, expectedValue)
 		}
 	})
+}
+
+func Test_Nesting_And_Deadlocks(t *testing.T) {
+	a := 0
+	atom := NewAtom(&a)
+
+	resultFirstUse := false
+	resultSecondUse := false
+
+	resultSwap := false
+
+	go func() {
+		time.Sleep(time.Second * 3)
+		deadlocked := false
+
+		if !(resultFirstUse && resultSecondUse) {
+			deadlocked = true
+			t.Error("Deadlock detected when calling Use().")
+		}
+
+		if !(resultSwap) {
+			deadlocked = true
+			t.Error("Deadlock detected when calling Swap().")
+		}
+
+		if deadlocked {
+			os.Exit(1)
+		}
+	}()
+
+	resultFirstUse = atom.Use(func(p1 *int) {
+		*p1++
+
+		resultSecondUse = atom.Nest().Use(func(p2 *int) {
+			*p2++
+		})
+	})
+
+	if !atom.Use(func(ptr *int) {
+		if *ptr != 2 {
+			t.Error("Value should have been incremented 2 times.")
+		}
+	}) {
+		t.Error("Atom is dead.")
+	}
+
+	resultSwap = atom.Swap(func(p1 *int) *int {
+		y := *p1
+		y++
+
+		// Use() must never call its handler inside another Swap().
+		resultNested := atom.Use(func(_ *int) {
+		})
+
+		// Swap() must never call its handler inside another Swap().
+		resultNested = resultNested || atom.Swap(func(_ *int) *int {
+			return nil
+		})
+
+		// Swap() from a nested Atom must never call its handler
+		// inside another Swap().
+		resultNested = resultNested || atom.Nest().Swap(func(_ *int) *int {
+			return nil
+		})
+
+		if resultNested || atom.IsDead() {
+			t.Error("Nested Use() or Swap() handler was called.")
+		}
+
+		return &y
+	})
+
+	if !atom.Use(func(ptr *int) {
+		if *ptr != 3 {
+			t.Error("Value should have been incremented 3 times.")
+		}
+	}) {
+		t.Error("Atom is dead.")
+	}
 }
