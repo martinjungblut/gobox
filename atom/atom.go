@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// Atom is a shared, atomic reference. Copies of an Atom always refer
-// to the same Atom, so a modification to any copy implies a state
+// Atom is a shared, atomic reference; copies of an Atom always refer
+// to the same value, so a modification to any copy implies a state
 // mutation across all copies.
 type Atom[T any] struct {
 	mutex        *sync.Mutex
@@ -18,22 +18,22 @@ type Atom[T any] struct {
 	value **T
 }
 
-// Type *T enforces a pointer must be used, during compile-time.
-func New[T any](value *T) Atom[T] {
+func New[T any](value T) Atom[T] {
 	mutex := sync.Mutex{}
 	lockedByUse := false
 	lockedBySwap := false
 
+	valueRef := &value
 	instance := Atom[T]{
 		mutex:        &mutex,
 		lockedByUse:  &lockedByUse,
 		lockedBySwap: &lockedBySwap,
-		value:        &value,
+		value:        &valueRef,
 	}
 
-	// Prevent double pointers during runtime.
+	// Prevent pointers during runtime.
 	rvalue := reflect.ValueOf(value)
-	if rvalue.Kind() == reflect.Ptr && rvalue.Elem().Kind() == reflect.Ptr {
+	if rvalue.Kind() == reflect.Ptr {
 		// Die.
 		*instance.value = nil
 	}
@@ -107,4 +107,17 @@ func (this Atom[T]) Nest() Atom[T] {
 	this.mutex = &mutex
 
 	return this
+}
+
+// SliceExtract() converts a slice of Atom[T] into a slice of T.
+func SliceExtract[T any](input []Atom[T]) []T {
+	output := make([]T, 0)
+
+	for _, atom := range input {
+		atom.Use(func(ptr *T) {
+			output = append(output, *ptr)
+		})
+	}
+
+	return output
 }
