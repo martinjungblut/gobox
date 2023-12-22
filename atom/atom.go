@@ -18,6 +18,11 @@ type Atom[T any] struct {
 	value **T
 }
 
+func Dead[T any]() Atom[T] {
+	var value *T = nil
+	return Atom[T]{value: &value}
+}
+
 func New[T any](value T) Atom[T] {
 	mutex := sync.Mutex{}
 	lockedByUse := false

@@ -33,6 +33,14 @@ func IncByAtomReference(atom *Atom[Counter]) {
 	})
 }
 
+func Test_Dead(t *testing.T) {
+	atom := Dead[int]()
+
+	if !atom.IsDead() {
+		t.Error("Atom should be dead.")
+	}
+}
+
 func Test_Pointer_Dies(t *testing.T) {
 	a := 10
 	atom := New(&a)
