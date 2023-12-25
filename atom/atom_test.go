@@ -33,10 +33,14 @@ func IncByAtomReference(atom *Atom[Counter]) {
 	})
 }
 
-func Test_Dead(t *testing.T) {
+func Test_Dead_IsDead_IsAlive(t *testing.T) {
 	atom := Dead[int]()
 
 	if !atom.IsDead() {
+		t.Error("Atom should be dead.")
+	}
+
+	if atom.IsAlive() {
 		t.Error("Atom should be dead.")
 	}
 }

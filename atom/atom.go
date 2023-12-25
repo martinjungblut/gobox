@@ -46,7 +46,7 @@ func New[T any](value T) Atom[T] {
 	return instance
 }
 
-// Use() takes a 'handler' func(*T) as its input, and passes the
+// Use() takes a 'handler' function as its input, and passes the
 // atom's value to said function, which is invoked atomically.
 func (this Atom[T]) Use(handler func(*T)) bool {
 	// Use() should never call 'handler' if the atom is dead.
@@ -65,7 +65,7 @@ func (this Atom[T]) Use(handler func(*T)) bool {
 	}
 }
 
-// Swap() takes a 'handler' func(*T) *T as its input, and passes the
+// Swap() takes a 'handler' function as its input, and passes the
 // atom's value to said function, which is invoked atomically; the
 // value returned by this 'handler' is used as the atom's new value.
 func (this Atom[T]) Swap(handler func(*T) *T) bool {
@@ -92,6 +92,12 @@ func (this Atom[T]) Swap(handler func(*T) *T) bool {
 // used anymore.
 func (this Atom[T]) IsDead() bool {
 	return *this.value == nil
+}
+
+// IsAlive() returns true if the atom is alive, meaning it can be used
+// normally.
+func (this Atom[T]) IsAlive() bool {
+	return *this.value != nil
 }
 
 // IsLocked() returns true if the atom is currently locked by a call
