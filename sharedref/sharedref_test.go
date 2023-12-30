@@ -196,12 +196,10 @@ func Test_Use_Inside_Use_Allowed(t *testing.T) {
 
 func Test_Use_Inside_Swap_Disallowed(t *testing.T) {
 	sharedref := New(0)
-
-	a, b := false, false
+	a, b := false, true
 
 	a = sharedref.Swap(func(ptr *int) *int {
 		b = sharedref.Use(func(_ *int) {})
-
 		return ptr
 	})
 
@@ -325,12 +323,10 @@ func Test_Locking_Inside_Use_Allowed(t *testing.T) {
 
 func Test_Locking_Inside_Swap_Disallowed(t *testing.T) {
 	sharedref := New(0)
-
-	a, b := false, false
+	a, b := false, true
 
 	a = sharedref.Swap(func(ptr *int) *int {
 		b = sharedref.Locking(func() {})
-
 		return ptr
 	})
 
@@ -353,9 +349,9 @@ func Test_Locking_Inside_Locking_Deadlocks(t *testing.T) {
 	}
 
 	sharedref := New(0, onContention)
+	a, b := false, false
 
-	b := false
-	a := sharedref.Locking(func() {
+	a = sharedref.Locking(func() {
 		b = sharedref.Locking(func() {})
 	})
 
@@ -368,7 +364,7 @@ func Test_Locking_Inside_Locking_Deadlocks(t *testing.T) {
 	}
 
 	if b {
-		t.Error("Nested Locking() should not have called its handler, as it deadlocked.")
+		t.Error("Nested Locking() should not have called its handler, as it should have deadlocked.")
 	}
 }
 
@@ -450,9 +446,9 @@ func Test_Swap_Nil_Pointer_Kills_SharedRef(t *testing.T) {
 
 func Test_Swap_Inside_Use_Disallowed(t *testing.T) {
 	sharedref := New(10)
+	a, b := false, true
 
-	b := true
-	a := sharedref.Use(func(_ *int) {
+	a = sharedref.Use(func(_ *int) {
 		b = sharedref.Swap(func(ptr *int) *int {
 			return ptr
 		})
@@ -469,9 +465,9 @@ func Test_Swap_Inside_Use_Disallowed(t *testing.T) {
 
 func Test_Swap_Inside_Locking_Disallowed(t *testing.T) {
 	sharedref := New(10)
+	a, b := false, true
 
-	b := true
-	a := sharedref.Locking(func() {
+	a = sharedref.Locking(func() {
 		b = sharedref.Swap(func(ptr *int) *int {
 			return ptr
 		})
@@ -496,13 +492,12 @@ func Test_Swap_Inside_Swap_Deadlocks(t *testing.T) {
 	}
 
 	sharedref := New(0, onContention)
+	a, b := false, false
 
-	b := false
-	a := sharedref.Swap(func(ptr *int) *int {
+	a = sharedref.Swap(func(ptr *int) *int {
 		b = sharedref.Swap(func(nptr *int) *int {
 			return nptr
 		})
-
 		return ptr
 	})
 
@@ -515,7 +510,7 @@ func Test_Swap_Inside_Swap_Deadlocks(t *testing.T) {
 	}
 
 	if b {
-		t.Error("Nested Swap() should not have called its handler, as it deadlocked.")
+		t.Error("Nested Swap() should not have called its handler, as it should have deadlocked.")
 	}
 }
 

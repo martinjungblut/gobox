@@ -10,15 +10,22 @@ import (
 // to the same value, so a modification to any copy implies a state
 // mutation across all copies.
 type SharedRef[T any] struct {
+	// 'mutex' guards the SharedRef against unsafe usage, save from
+	// the direct pointer access possible inside Use() blocks.
 	mutex           *sync.Mutex
 	lockedByLocking *bool
 	lockedBySwap    *bool
 
-	// useCounter specifies how many Use() blocks are currently
-	// running; it is guarded by a mutex
+	// 'useCounter' specifies how many Use() blocks are currently
+	// running; it is guarded by a mutex.
 	useCounter      *int
 	useCounterMutex *sync.Mutex
 
+	// 'contentionHandlers' are functions that are called whenever
+	// contention is detected inside Locking() or Swap(). These
+	// functions may then ask Locking() or Swap() to give up
+	// altogether, based on how much time has passed since they
+	// originally started trying to lock 'mutex'.
 	contentionHandlers []func(time.Duration, func())
 
 	// 'value' must be a **T so that we can modify it from SharedRef
@@ -152,7 +159,7 @@ func (this SharedRef[T]) IsAlive() bool {
 }
 
 // IsLocked() returns true if the SharedRef is currently locked by a call
-// to Use() or Swap().
+// to Locking() or Swap().
 func (this SharedRef[T]) IsLocked() bool {
 	return *this.lockedByLocking || *this.lockedBySwap
 }
