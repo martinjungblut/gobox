@@ -3,6 +3,7 @@ package sharedref
 import (
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -10,16 +11,15 @@ import (
 // to the same value, so a modification to any copy implies a state
 // mutation across all copies.
 type SharedRef[T any] struct {
-	// 'mutex' guards the SharedRef against unsafe usage, save from
-	// the direct pointer access possible inside Use() blocks.
-	mutex           *sync.Mutex
-	lockedByLocking *bool
-	lockedBySwap    *bool
+	// 'lsMutex' guards the SharedRef against unsafe usage, in regards
+	// to Locking() and Swap().
+	lsMutex    *sync.Mutex
+	lsLocking  *atomic.Bool
+	lsSwapping *atomic.Bool
 
 	// 'useCounter' specifies how many Use() blocks are currently
-	// running; it is guarded by a mutex.
-	useCounter      *int
-	useCounterMutex *sync.Mutex
+	// running.
+	useCounter *atomic.Int64
 
 	// 'contentionHandlers' are functions that are called whenever
 	// contention is detected inside Locking() or Swap(). These
@@ -48,20 +48,18 @@ func Dead[T any]() SharedRef[T] {
 
 // New() creates a new SharedRef.
 func New[T any](value T, contentionHandlers ...func(time.Duration, func())) SharedRef[T] {
-	mutex := sync.Mutex{}
-	lockedByLocking := false
-	lockedBySwap := false
+	lsMutex := sync.Mutex{}
+	lsLocking := atomic.Bool{}
+	lsSwapping := atomic.Bool{}
 
-	useCounter := 0
-	useCounterMutex := sync.Mutex{}
+	useCounter := atomic.Int64{}
 
 	valueRef := &value
 	instance := SharedRef[T]{
-		mutex:              &mutex,
-		lockedByLocking:    &lockedByLocking,
-		lockedBySwap:       &lockedBySwap,
+		lsMutex:            &lsMutex,
+		lsLocking:          &lsLocking,
+		lsSwapping:         &lsSwapping,
 		useCounter:         &useCounter,
-		useCounterMutex:    &useCounterMutex,
 		contentionHandlers: contentionHandlers,
 		value:              &valueRef,
 	}
@@ -81,39 +79,32 @@ func New[T any](value T, contentionHandlers ...func(time.Duration, func())) Shar
 func (this SharedRef[T]) Use(handler func(*T)) bool {
 	// Use() should never call 'handler' if the SharedRef is dead or
 	// locked by Swap().
-	if this.IsDead() || *this.lockedBySwap {
+	if this.IsDead() || this.lsSwapping.Load() {
 		return false
-	} else {
-		this.useCounterMutex.Lock()
-		*this.useCounter++
-		this.useCounterMutex.Unlock()
-
-		handler(*this.value)
-
-		this.useCounterMutex.Lock()
-		*this.useCounter--
-		this.useCounterMutex.Unlock()
-
-		return true
 	}
+
+	this.useCounter.Add(1)
+	handler(*this.value)
+	this.useCounter.Add(-1)
+	return true
 }
 
 // Locking() takes a 'handler' function as its input, and calls this
 // handler function atomically.
 func (this SharedRef[T]) Locking(handler func()) bool {
-	if this.IsDead() || *this.lockedBySwap {
+	if this.IsDead() || this.lsSwapping.Load() {
 		// Locking() should never call 'handler' if the SharedRef is
 		// dead or locked by Swap().
 		return false
-	} else if !this.tryLock(this.mutex) {
+	} else if !this.tryLock(this.lsMutex) {
 		// If tryLock() gives up due to contention, give up.
 		return false
 	}
 
-	*this.lockedByLocking = true
+	this.lsLocking.Store(true)
 	defer func() {
-		*this.lockedByLocking = false
-		this.mutex.Unlock()
+		this.lsLocking.Store(false)
+		this.lsMutex.Unlock()
 	}()
 
 	handler()
@@ -125,19 +116,19 @@ func (this SharedRef[T]) Locking(handler func()) bool {
 // atomically; the pointer value returned by this 'handler' is used as
 // the SharedRef's new value.
 func (this SharedRef[T]) Swap(handler func(*T) *T) bool {
-	if this.IsDead() || *this.lockedByLocking || *this.useCounter > 0 {
+	if this.IsDead() || this.lsLocking.Load() || this.useCounter.Load() > 0 {
 		// Swap() should never call its 'handler' if the SharedRef is
 		// dead, inside a Locking() block, or inside a Use() block.
 		return false
-	} else if !this.tryLock(this.mutex) {
+	} else if !this.tryLock(this.lsMutex) {
 		// If tryLock() gives up due to contention, give up.
 		return false
 	}
 
-	*this.lockedBySwap = true
+	this.lsSwapping.Store(true)
 	defer func() {
-		*this.lockedBySwap = false
-		this.mutex.Unlock()
+		this.lsSwapping.Store(false)
+		this.lsMutex.Unlock()
 	}()
 
 	// If 'newValue' is nil, the SharedRef will die.
@@ -161,7 +152,7 @@ func (this SharedRef[T]) IsAlive() bool {
 // IsLocked() returns true if the SharedRef is currently locked by a call
 // to Locking() or Swap().
 func (this SharedRef[T]) IsLocked() bool {
-	return *this.lockedByLocking || *this.lockedBySwap
+	return this.lsLocking.Load() || this.lsSwapping.Load()
 }
 
 func (this SharedRef[T]) tryLock(mutex *sync.Mutex) bool {

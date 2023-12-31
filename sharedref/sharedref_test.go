@@ -3,6 +3,7 @@ package sharedref
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -511,6 +512,92 @@ func Test_Swap_Inside_Swap_Deadlocks(t *testing.T) {
 
 	if b {
 		t.Error("Nested Swap() should not have called its handler, as it should have deadlocked.")
+	}
+}
+
+func Test_Use_Swap_Not_Mutually_Exclusive(t *testing.T) {
+	failed := false
+	sharedref := New(10)
+	wg := sync.WaitGroup{}
+	wg.Add(2000)
+
+	useRunning := atomic.Bool{}
+	swapRunning := atomic.Bool{}
+
+	for i := 1; i <= 1000; i++ {
+		go func() {
+			sharedref.Use(func(_ *int) {
+				useRunning.Store(true)
+				defer useRunning.Store(false)
+
+				if swapRunning.Load() {
+					failed = true
+				}
+			})
+			wg.Done()
+		}()
+
+		go func() {
+			sharedref.Swap(func(ptr *int) *int {
+				swapRunning.Store(true)
+				defer swapRunning.Store(false)
+
+				if useRunning.Load() {
+					failed = true
+				}
+
+				return ptr
+			})
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+	if !failed {
+		t.Fatal("Test should have failed.")
+	}
+}
+
+func Test_Locking_Swap_Mutually_Exclusive(t *testing.T) {
+	failed := false
+	sharedref := New(10)
+	wg := sync.WaitGroup{}
+	wg.Add(2000)
+
+	lockingRunning := atomic.Bool{}
+	swapRunning := atomic.Bool{}
+
+	for i := 1; i <= 1000; i++ {
+		go func() {
+			sharedref.Locking(func() {
+				lockingRunning.Store(true)
+				defer lockingRunning.Store(false)
+
+				if swapRunning.Load() {
+					failed = true
+				}
+			})
+			wg.Done()
+		}()
+
+		go func() {
+			sharedref.Swap(func(ptr *int) *int {
+				swapRunning.Store(true)
+				defer swapRunning.Store(false)
+
+				if lockingRunning.Load() {
+					failed = true
+				}
+
+				return ptr
+			})
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+	if failed {
+		t.Fatal("Test should not have failed.")
 	}
 }
 
