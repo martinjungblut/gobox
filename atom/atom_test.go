@@ -1,4 +1,4 @@
-package sharedref
+package atom
 
 import (
 	"runtime"
@@ -36,16 +36,16 @@ func (this Counter) IncByValue() {
 	this.Value++
 }
 
-func IncByValue(sharedref SharedRef[Counter]) {
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+func IncByValue(atom Atom[Counter]) {
+	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
 		counter := <-portal.Reader
 		counter.IncByReference()
 		portal.Writer <- counter
 	})
 }
 
-func IncByReference(sharedref *SharedRef[Counter]) {
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+func IncByReference(atom *Atom[Counter]) {
+	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
 		counter := <-portal.Reader
 		counter.IncByReference()
 		portal.Writer <- counter
@@ -53,35 +53,35 @@ func IncByReference(sharedref *SharedRef[Counter]) {
 }
 
 func Test_IsAlive(t *testing.T) {
-	sharedref := New(0)
+	atom := New(0)
 
-	if !sharedref.IsAlive() {
+	if !atom.IsAlive() {
 		t.Error("Should be alive.")
 	}
 }
 
 func Test_IsDead(t *testing.T) {
-	sharedref := Dead[int]()
+	atom := Dead[int]()
 
-	if !sharedref.IsDead() {
+	if !atom.IsDead() {
 		t.Error("Should be dead.")
 	}
 }
 
 func Test_Pointer_Kills(t *testing.T) {
 	number := 10
-	sharedref := New(&number)
+	atom := New(&number)
 
-	if !sharedref.IsDead() {
+	if !atom.IsDead() {
 		t.Error("Should be dead.")
 	}
 }
 
 func Test_NoCopy(t *testing.T) {
-	sharedref := New(atomic.Bool{})
+	atom := New(atomic.Bool{})
 	check := false
 
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[atomic.Bool]) {
+	atom.Do(&sync.Mutex{}, func(portal Portal[atomic.Bool]) {
 		boolean := <-portal.Reader
 		boolean.Store(true)
 
@@ -95,28 +95,28 @@ func Test_NoCopy(t *testing.T) {
 }
 
 func Test_Do_Dead(t *testing.T) {
-	sharedref := Dead[int]()
+	atom := Dead[int]()
 
 	called := false
 
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[int]) {
+	atom.Do(&sync.Mutex{}, func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		portal.Writer <- pointer
 		called = true
 	})
 
 	if called {
-		t.Error("Do() should not invoke its body if the SharedRef is dead.")
+		t.Error("Do() should not invoke its body if the Atom is dead.")
 	}
 }
 
 func Test_Do_Atomicity(t *testing.T) {
-	sharedref := New(0)
+	atom := New(0)
 	cycles := 1000
 	mutex := &sync.Mutex{}
 
 	Concurrently(cycles, func() {
-		sharedref.Do(mutex, func(portal Portal[int]) {
+		atom.Do(mutex, func(portal Portal[int]) {
 			pointer := <-portal.Reader
 
 			value := *pointer
@@ -126,7 +126,7 @@ func Test_Do_Atomicity(t *testing.T) {
 		})
 	})
 
-	sharedref.Do(mutex, func(portal Portal[int]) {
+	atom.Do(mutex, func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		value := *pointer
 
@@ -139,17 +139,17 @@ func Test_Do_Atomicity(t *testing.T) {
 }
 
 func Test_Do_Nesting(t *testing.T) {
-	sharedref := New(0)
+	atom := New(0)
 
 	check1, check2, check3 := false, false, false
 	mutexA := &sync.Mutex{}
 	mutexB := &sync.Mutex{}
 
-	sharedref.Do(mutexA, func(portalA Portal[int]) {
+	atom.Do(mutexA, func(portalA Portal[int]) {
 		pointerA := <-portalA.Reader
 		*pointerA++
 
-		sharedref.Do(mutexB, func(portalB Portal[int]) {
+		atom.Do(mutexB, func(portalB Portal[int]) {
 			pointerB := <-portalB.Reader
 			*pointerB++
 
@@ -161,7 +161,7 @@ func Test_Do_Nesting(t *testing.T) {
 		portalA.Writer <- pointerA
 	})
 
-	sharedref.Do(mutexA, func(portal Portal[int]) {
+	atom.Do(mutexA, func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		portal.Writer <- pointer
 
@@ -188,10 +188,10 @@ func Test_Do_Nesting(t *testing.T) {
 }
 
 func Test_Do_Reader_Writer(t *testing.T) {
-	sharedref := New(0)
+	atom := New(0)
 	mutex := &sync.Mutex{}
 
-	sharedref.Do(mutex, func(portal Portal[int]) {
+	atom.Do(mutex, func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		if pointer == nil {
 			t.Error("Reading the first time should not be nil.")
@@ -205,7 +205,7 @@ func Test_Do_Reader_Writer(t *testing.T) {
 		// portal.Writer <- pointer
 	})
 
-	sharedref.Do(mutex, func(portal Portal[int]) {
+	atom.Do(mutex, func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		if pointer == nil {
 			t.Error("Reading the should not be nil.")
@@ -215,13 +215,13 @@ func Test_Do_Reader_Writer(t *testing.T) {
 }
 
 func Test_Do_Last_Write_Wins(t *testing.T) {
-	sharedref := New(0)
+	atom := New(0)
 
 	mutexA := &sync.Mutex{}
 	mutexB := &sync.Mutex{}
 
-	sharedref.Do(mutexA, func(portalA Portal[int]) {
-		sharedref.Do(mutexB, func(portalB Portal[int]) {
+	atom.Do(mutexA, func(portalA Portal[int]) {
+		atom.Do(mutexB, func(portalB Portal[int]) {
 			pointerB := <-portalB.Reader
 			*pointerB++
 			portalB.Writer <- pointerB
@@ -234,7 +234,7 @@ func Test_Do_Last_Write_Wins(t *testing.T) {
 		portalA.Writer <- nil
 	})
 
-	if !sharedref.IsDead() {
+	if !atom.IsDead() {
 		t.Error("Should be dead.")
 	}
 }
@@ -258,11 +258,11 @@ func Test_Mutation_Assumptions(t *testing.T) {
 }
 
 func Test_Mutation(t *testing.T) {
-	sharedref := New(Counter{Value: 0})
+	atom := New(Counter{Value: 0})
 
 	// Call methods directly inside a Use() block. Regular Go
 	// semantics apply.
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 
 		// Value becomes 1.
@@ -282,10 +282,10 @@ func Test_Mutation(t *testing.T) {
 	})
 
 	// Call methods inside another function that received the
-	// SharedRef as a copy.
+	// Atom as a copy.
 	// Value becomes 2.
-	IncByValue(sharedref)
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	IncByValue(atom)
+	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 2 {
 			t.Error("Function IncByValue() performed no mutation.")
@@ -294,10 +294,10 @@ func Test_Mutation(t *testing.T) {
 	})
 
 	// Call methods inside another function that received the
-	// SharedRef by reference.
+	// Atom by reference.
 	// Value becomes 3.
-	IncByReference(&sharedref)
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	IncByReference(&atom)
+	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 3 {
 			t.Error("Function IncByReference() performed no mutation.")
@@ -305,7 +305,7 @@ func Test_Mutation(t *testing.T) {
 		portal.Writer <- pointer
 	})
 
-	func(copy SharedRef[Counter]) {
+	func(copy Atom[Counter]) {
 		// Do() on a local copy named 'copy'. Mutates.
 		// Value becomes 4.
 		copy.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
@@ -313,10 +313,10 @@ func Test_Mutation(t *testing.T) {
 			pointer.Value++
 			portal.Writer <- pointer
 		})
-	}(sharedref)
+	}(atom)
 
-	// We can see the original 'sharedref' was mutated here.
-	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	// We can see the original 'atom' was mutated here.
+	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 4 {
 			t.Error("Do() performed no mutations.")

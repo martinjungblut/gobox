@@ -1,4 +1,4 @@
-package sharedref
+package atom
 
 import (
 	"reflect"
@@ -15,23 +15,23 @@ type Portal[T any] struct {
 	Writer chan<- *T
 }
 
-// SharedRef is a shared reference; copies of a SharedRef always refer
-// to the same value, so a modification to any copy implies a state
-// mutation across all copies.
-type SharedRef[T any] struct {
+// Atom is a shared reference; copies of an Atom always refer to the
+// same value, so a modification to any copy implies a state mutation
+// across all copies.
+type Atom[T any] struct {
 	state **T
 }
 
-// New() creates a new SharedRef.
-func New[T any](value T) SharedRef[T] {
+// New() creates a new Atom.
+func New[T any](value T) Atom[T] {
 	pointer := &value
-	instance := SharedRef[T]{
+	instance := Atom[T]{
 		state: &pointer,
 	}
 
 	// Prevent pointers during runtime.
-	rvalue := reflect.ValueOf(value)
-	if rvalue.Kind() == reflect.Ptr {
+	reflectedValue := reflect.ValueOf(value)
+	if reflectedValue.Kind() == reflect.Ptr {
 		// Die.
 		*instance.state = nil
 	}
@@ -39,9 +39,9 @@ func New[T any](value T) SharedRef[T] {
 	return instance
 }
 
-// Dead() creates a dead SharedRef; it replaces the uses of nil
-// pointers when we want to represent optionality.
-func Dead[T any]() SharedRef[T] {
+// Dead() creates a dead Atom; it replaces the uses of nil pointers
+// when we want to represent optionality.
+func Dead[T any]() Atom[T] {
 	var value T
 	var pointer *T = nil
 
@@ -51,7 +51,7 @@ func Dead[T any]() SharedRef[T] {
 	return instance
 }
 
-func (this SharedRef[T]) Do(locker sync.Locker, body func(Portal[T])) {
+func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	if this.IsDead() {
 		return
 	}
@@ -82,10 +82,10 @@ func (this SharedRef[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	wg.Wait()
 }
 
-func (this SharedRef[T]) IsAlive() bool {
+func (this Atom[T]) IsAlive() bool {
 	return *this.state != nil
 }
 
-func (this SharedRef[T]) IsDead() bool {
+func (this Atom[T]) IsDead() bool {
 	return *this.state == nil
 }
