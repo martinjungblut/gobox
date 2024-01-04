@@ -37,18 +37,18 @@ func (this Counter) IncByValue() {
 }
 
 func IncByValue(sharedref SharedRef[Counter]) {
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-		counter := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		counter := <-portal.Reader
 		counter.IncByReference()
-		writer <- counter
+		portal.Writer <- counter
 	})
 }
 
 func IncByReference(sharedref *SharedRef[Counter]) {
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-		counter := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		counter := <-portal.Reader
 		counter.IncByReference()
-		writer <- counter
+		portal.Writer <- counter
 	})
 }
 
@@ -81,11 +81,11 @@ func Test_NoCopy(t *testing.T) {
 	sharedref := New(atomic.Bool{})
 	check := false
 
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *atomic.Bool, writer chan<- *atomic.Bool) {
-		boolean := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[atomic.Bool]) {
+		boolean := <-portal.Reader
 		boolean.Store(true)
 
-		writer <- boolean
+		portal.Writer <- boolean
 		check = true
 	})
 
@@ -99,9 +99,9 @@ func Test_Do_Dead(t *testing.T) {
 
 	called := false
 
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *int, writer chan<- *int) {
-		pointer := <-reader
-		writer <- pointer
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[int]) {
+		pointer := <-portal.Reader
+		portal.Writer <- pointer
 		called = true
 	})
 
@@ -116,25 +116,25 @@ func Test_Do_Atomicity(t *testing.T) {
 	mutex := &sync.Mutex{}
 
 	Concurrently(cycles, func() {
-		sharedref.Do(mutex, func(reader <-chan *int, writer chan<- *int) {
-			pointer := <-reader
+		sharedref.Do(mutex, func(portal Portal[int]) {
+			pointer := <-portal.Reader
 
 			value := *pointer
 			value++
 
-			writer <- &value
+			portal.Writer <- &value
 		})
 	})
 
-	sharedref.Do(mutex, func(reader <-chan *int, writer chan<- *int) {
-		pointer := <-reader
+	sharedref.Do(mutex, func(portal Portal[int]) {
+		pointer := <-portal.Reader
 		value := *pointer
 
 		if value != cycles {
 			t.Errorf("value was '%d', but should have been '%d'.", value, cycles)
 		}
 
-		writer <- pointer
+		portal.Writer <- pointer
 	})
 }
 
@@ -145,25 +145,25 @@ func Test_Do_Nesting(t *testing.T) {
 	mutexA := &sync.Mutex{}
 	mutexB := &sync.Mutex{}
 
-	sharedref.Do(mutexA, func(reader <-chan *int, writer chan<- *int) {
-		pointerA := <-reader
+	sharedref.Do(mutexA, func(portalA Portal[int]) {
+		pointerA := <-portalA.Reader
 		*pointerA++
 
-		sharedref.Do(mutexB, func(readerB <-chan *int, writerB chan<- *int) {
-			pointerB := <-readerB
+		sharedref.Do(mutexB, func(portalB Portal[int]) {
+			pointerB := <-portalB.Reader
 			*pointerB++
 
 			check2 = true
-			writerB <- pointerB
+			portalB.Writer <- pointerB
 		})
 
 		check1 = true
-		writer <- pointerA
+		portalA.Writer <- pointerA
 	})
 
-	sharedref.Do(mutexA, func(reader <-chan *int, writer chan<- *int) {
-		pointer := <-reader
-		writer <- pointer
+	sharedref.Do(mutexA, func(portal Portal[int]) {
+		pointer := <-portal.Reader
+		portal.Writer <- pointer
 
 		if *pointer != 2 {
 			t.Errorf("Value should be 2, but instead it was: '%d'.", *pointer)
@@ -191,26 +191,26 @@ func Test_Do_Reader_Writer(t *testing.T) {
 	sharedref := New(0)
 	mutex := &sync.Mutex{}
 
-	sharedref.Do(mutex, func(reader <-chan *int, writer chan<- *int) {
-		pointer := <-reader
+	sharedref.Do(mutex, func(portal Portal[int]) {
+		pointer := <-portal.Reader
 		if pointer == nil {
 			t.Error("Reading the first time should not be nil.")
 		}
-		if <-reader != nil {
+		if <-portal.Reader != nil {
 			t.Error("Reading a second time should be nil.")
 		}
 
-		writer <- pointer
+		portal.Writer <- pointer
 		// This would panic, as the writer has already been closed.
-		// writer <- pointer
+		// portal.Writer <- pointer
 	})
 
-	sharedref.Do(mutex, func(reader <-chan *int, writer chan<- *int) {
-		pointer := <-reader
+	sharedref.Do(mutex, func(portal Portal[int]) {
+		pointer := <-portal.Reader
 		if pointer == nil {
 			t.Error("Reading the should not be nil.")
 		}
-		writer <- pointer
+		portal.Writer <- pointer
 	})
 }
 
@@ -220,18 +220,18 @@ func Test_Do_Last_Write_Wins(t *testing.T) {
 	mutexA := &sync.Mutex{}
 	mutexB := &sync.Mutex{}
 
-	sharedref.Do(mutexA, func(readerA <-chan *int, writerA chan<- *int) {
-		sharedref.Do(mutexB, func(readerB <-chan *int, writerB chan<- *int) {
-			pointerB := <-readerB
+	sharedref.Do(mutexA, func(portalA Portal[int]) {
+		sharedref.Do(mutexB, func(portalB Portal[int]) {
+			pointerB := <-portalB.Reader
 			*pointerB++
-			writerB <- pointerB
+			portalB.Writer <- pointerB
 		})
 
-		pointerA := <-readerA
+		pointerA := <-portalA.Reader
 		if *pointerA != 1 {
 			t.Errorf("Value should be 1, but instead it was: '%d'.", *pointerA)
 		}
-		writerA <- nil
+		portalA.Writer <- nil
 	})
 
 	if !sharedref.IsDead() {
@@ -262,8 +262,8 @@ func Test_Mutation(t *testing.T) {
 
 	// Call methods directly inside a Use() block. Regular Go
 	// semantics apply.
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-		pointer := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		pointer := <-portal.Reader
 
 		// Value becomes 1.
 		pointer.IncByReference()
@@ -278,49 +278,49 @@ func Test_Mutation(t *testing.T) {
 			t.Error("Method IncByValue() performed a mutation.")
 		}
 
-		writer <- pointer
+		portal.Writer <- pointer
 	})
 
 	// Call methods inside another function that received the
 	// SharedRef as a copy.
 	// Value becomes 2.
 	IncByValue(sharedref)
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-		pointer := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		pointer := <-portal.Reader
 		if pointer.Value != 2 {
 			t.Error("Function IncByValue() performed no mutation.")
 		}
-		writer <- pointer
+		portal.Writer <- pointer
 	})
 
 	// Call methods inside another function that received the
 	// SharedRef by reference.
 	// Value becomes 3.
 	IncByReference(&sharedref)
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-		pointer := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		pointer := <-portal.Reader
 		if pointer.Value != 3 {
 			t.Error("Function IncByReference() performed no mutation.")
 		}
-		writer <- pointer
+		portal.Writer <- pointer
 	})
 
 	func(copy SharedRef[Counter]) {
 		// Do() on a local copy named 'copy'. Mutates.
 		// Value becomes 4.
-		copy.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-			pointer := <-reader
+		copy.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+			pointer := <-portal.Reader
 			pointer.Value++
-			writer <- pointer
+			portal.Writer <- pointer
 		})
 	}(sharedref)
 
 	// We can see the original 'sharedref' was mutated here.
-	sharedref.Do(&sync.Mutex{}, func(reader <-chan *Counter, writer chan<- *Counter) {
-		pointer := <-reader
+	sharedref.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		pointer := <-portal.Reader
 		if pointer.Value != 4 {
 			t.Error("Do() performed no mutations.")
 		}
-		writer <- pointer
+		portal.Writer <- pointer
 	})
 }
