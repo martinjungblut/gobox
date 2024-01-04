@@ -9,40 +9,43 @@ import (
 // to the same value, so a modification to any copy implies a state
 // mutation across all copies.
 type SharedRef[T any] struct {
-	value **T
+	state **T
 }
 
 // New() creates a new SharedRef.
 func New[T any](value T) SharedRef[T] {
-	valueRef := &value
-
+	pointer := &value
 	instance := SharedRef[T]{
-		value: &valueRef,
+		state: &pointer,
 	}
 
 	// Prevent pointers during runtime.
 	rvalue := reflect.ValueOf(value)
 	if rvalue.Kind() == reflect.Ptr {
 		// Die.
-		*instance.value = nil
+		*instance.state = nil
 	}
 
 	return instance
 }
 
-// Dead() creates a dead SharedRef; it is useless, but replaces a nil
-// value when we want to represent optionality using raw pointers.
+// Dead() creates a dead SharedRef; it replaces the uses of nil
+// pointers when we want to represent optionality.
 func Dead[T any]() SharedRef[T] {
 	var value T
 	var pointer *T = nil
 
 	instance := New(value)
-	instance.value = &pointer
+	instance.state = &pointer
 
 	return instance
 }
 
 func (this SharedRef[T]) Do(locker sync.Locker, body func(<-chan *T, chan<- *T)) {
+	if this.IsDead() {
+		return
+	}
+
 	reader := make(chan *T)
 	writer := make(chan *T)
 
@@ -56,19 +59,19 @@ func (this SharedRef[T]) Do(locker sync.Locker, body func(<-chan *T, chan<- *T))
 		locker.Unlock()
 	}()
 
-	reader <- *this.value
+	reader <- *this.state
 	close(reader)
 
-	*this.value = <-writer
+	*this.state = <-writer
 	close(writer)
 
 	wg.Wait()
 }
 
 func (this SharedRef[T]) IsAlive() bool {
-	return *this.value != nil
+	return *this.state != nil
 }
 
 func (this SharedRef[T]) IsDead() bool {
-	return *this.value == nil
+	return *this.state == nil
 }

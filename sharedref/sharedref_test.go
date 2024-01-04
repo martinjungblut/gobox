@@ -3,6 +3,7 @@ package sharedref
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -67,16 +68,58 @@ func Test_IsDead(t *testing.T) {
 	}
 }
 
-func Test_Atomicity(t *testing.T) {
+func Test_Pointer_Kills(t *testing.T) {
+	number := 10
+	sharedref := New(&number)
+
+	if !sharedref.IsDead() {
+		t.Error("Should be dead.")
+	}
+}
+
+func Test_NoCopy(t *testing.T) {
+	sharedref := New(atomic.Bool{})
+	check := false
+
+	sharedref.Do(&sync.Mutex{}, func(reader <-chan *atomic.Bool, writer chan<- *atomic.Bool) {
+		boolean := <-reader
+		boolean.Store(true)
+
+		writer <- boolean
+		check = true
+	})
+
+	if !check {
+		t.Error("Check failed.")
+	}
+}
+
+func Test_Do_Dead(t *testing.T) {
+	sharedref := Dead[int]()
+
+	called := false
+
+	sharedref.Do(&sync.Mutex{}, func(reader <-chan *int, writer chan<- *int) {
+		pointer := <-reader
+		writer <- pointer
+		called = true
+	})
+
+	if called {
+		t.Error("Do() should not invoke its body if the SharedRef is dead.")
+	}
+}
+
+func Test_Do_Atomicity(t *testing.T) {
 	sharedref := New(0)
 	cycles := 1000
 	mutex := &sync.Mutex{}
 
 	Concurrently(cycles, func() {
 		sharedref.Do(mutex, func(reader <-chan *int, writer chan<- *int) {
-			ptr := <-reader
+			pointer := <-reader
 
-			value := *ptr
+			value := *pointer
 			value++
 
 			writer <- &value
@@ -84,18 +127,18 @@ func Test_Atomicity(t *testing.T) {
 	})
 
 	sharedref.Do(mutex, func(reader <-chan *int, writer chan<- *int) {
-		ptr := <-reader
-		value := *ptr
+		pointer := <-reader
+		value := *pointer
 
 		if value != cycles {
 			t.Errorf("value was '%d', but should have been '%d'.", value, cycles)
 		}
 
-		writer <- ptr
+		writer <- pointer
 	})
 }
 
-func Test_Nesting(t *testing.T) {
+func Test_Do_Nesting(t *testing.T) {
 	sharedref := New(0)
 
 	check1, check2, check3 := false, false, false
@@ -119,11 +162,11 @@ func Test_Nesting(t *testing.T) {
 	})
 
 	sharedref.Do(mutexA, func(reader <-chan *int, writer chan<- *int) {
-		ptr := <-reader
-		writer <- ptr
+		pointer := <-reader
+		writer <- pointer
 
-		if *ptr != 2 {
-			t.Errorf("Value should be 2, but instead it was: '%d'.", *ptr)
+		if *pointer != 2 {
+			t.Errorf("Value should be 2, but instead it was: '%d'.", *pointer)
 		}
 
 		// Ensure method runs until the end, and that this actually
@@ -144,7 +187,7 @@ func Test_Nesting(t *testing.T) {
 	}
 }
 
-func Test_Reader_Writer(t *testing.T) {
+func Test_Do_Reader_Writer(t *testing.T) {
 	sharedref := New(0)
 	mutex := &sync.Mutex{}
 
@@ -171,7 +214,7 @@ func Test_Reader_Writer(t *testing.T) {
 	})
 }
 
-func Test_Last_Write_Wins(t *testing.T) {
+func Test_Do_Last_Write_Wins(t *testing.T) {
 	sharedref := New(0)
 
 	mutexA := &sync.Mutex{}
