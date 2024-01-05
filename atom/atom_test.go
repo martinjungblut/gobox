@@ -341,7 +341,7 @@ func Test_Atom_Mutation(t *testing.T) {
 func Test_AtomGroup_Constructors(t *testing.T) {
 	group := NewAtomGroup[int]("integers")
 
-	alive := group.New(10)
+	alive := group.New("alive", 10)
 	if !alive.IsAlive() {
 		t.Error("Atom should be alive.")
 	}
@@ -358,17 +358,24 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 	group := NewAtomGroup[int]("integers")
 	seqPrevious := make([]int, 0)
 	seqCurrent := make([]int, 0)
-	group.OnReadWrite(func(_ string, previous *int, current *int) {
-		seqPrevious = append(seqPrevious, *previous)
+
+	groupName := ""
+	atomName := ""
+
+	group.OnReadWrite(func(event ReadWriteEvent[int]) {
+		seqPrevious = append(seqPrevious, *event.Previous)
 
 		value := -1
-		if current != nil {
-			value = *current
+		if event.Current != nil {
+			value = *event.Current
 		}
 		seqCurrent = append(seqCurrent, value)
+
+		groupName = event.GroupName
+		atomName = event.AtomName
 	})
 
-	atom := group.New(0)
+	atom := group.New("simple-atom", 0)
 
 	mutex := &sync.Mutex{}
 	Concurrently(cycles, func() {
@@ -401,4 +408,12 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 
 	assertSequential(0, seqPrevious)
 	assertSequential(1, seqCurrent)
+
+	if groupName != "integers" {
+		t.Error("Incorrect group name")
+	}
+
+	if atomName != "simple-atom" {
+		t.Error("Incorrect group name")
+	}
 }

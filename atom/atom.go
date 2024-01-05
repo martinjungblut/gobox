@@ -20,6 +20,7 @@ type Portal[T any] struct {
 // across all copies.
 type Atom[T any] struct {
 	state **T
+	name  *string
 	group *AtomGroup[T]
 }
 
@@ -81,8 +82,8 @@ func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	*this.state = current
 	close(writer)
 
-	if this.group != nil {
-		this.group.DoReadWrite(previous, current)
+	if this.group != nil && this.name != nil {
+		this.group.DoReadWrite(*this.name, previous, current)
 	}
 	locker.Unlock()
 
@@ -99,38 +100,45 @@ func (this Atom[T]) IsDead() bool {
 
 type AtomGroup[T any] struct {
 	name        string
-	onReadWrite func(string, *T, *T)
-	mutex       sync.Mutex
+	onReadWrite func(ReadWriteEvent[T])
 }
 
 func NewAtomGroup[T any](name string) AtomGroup[T] {
 	return AtomGroup[T]{
-		name:  name,
-		mutex: sync.Mutex{},
+		name: name,
 	}
 }
 
-func (this *AtomGroup[T]) New(value T) Atom[T] {
+func (this *AtomGroup[T]) New(name string, value T) Atom[T] {
 	atom := New(value)
+	atom.name = &name
 	atom.group = this
 	return atom
 }
 
 func (this *AtomGroup[T]) Dead() Atom[T] {
-	atom := Dead[T]()
-	atom.group = this
-	return atom
+	return Dead[T]()
 }
 
-func (this *AtomGroup[T]) OnReadWrite(callback func(string, *T, *T)) {
+func (this *AtomGroup[T]) OnReadWrite(callback func(ReadWriteEvent[T])) {
 	this.onReadWrite = callback
 }
 
-func (this *AtomGroup[T]) DoReadWrite(previous *T, current *T) {
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
-
+func (this *AtomGroup[T]) DoReadWrite(name string, previous *T, current *T) {
 	if this.onReadWrite != nil {
-		this.onReadWrite(this.name, previous, current)
+		event := ReadWriteEvent[T]{
+			GroupName: this.name,
+			AtomName:  name,
+			Previous:  previous,
+			Current:   current,
+		}
+		this.onReadWrite(event)
 	}
+}
+
+type ReadWriteEvent[T any] struct {
+	GroupName string
+	AtomName  string
+	Previous  *T
+	Current   *T
 }
