@@ -94,22 +94,6 @@ func Test_Atom_NoCopy(t *testing.T) {
 	}
 }
 
-func Test_Atom_Do_Dead(t *testing.T) {
-	atom := Dead[int]()
-
-	called := false
-
-	atom.Do(&sync.Mutex{}, func(portal Portal[int]) {
-		pointer := <-portal.Reader
-		portal.Writer <- pointer
-		called = true
-	})
-
-	if called {
-		t.Error("Do() should not invoke its body if the Atom is dead.")
-	}
-}
-
 func Test_Atom_Do_Atomicity(t *testing.T) {
 	cycles := 100000
 
@@ -137,6 +121,25 @@ func Test_Atom_Do_Atomicity(t *testing.T) {
 
 		portal.Writer <- pointer
 	})
+}
+
+func Test_Atom_Do_Dead_Atomicity(t *testing.T) {
+	atom := New(0)
+	mutex := &sync.Mutex{}
+
+	counter := atomic.Int64{}
+
+	Concurrently(100000, func() {
+		atom.Do(mutex, func(portal Portal[int]) {
+			<-portal.Reader
+			portal.Writer <- nil
+			counter.Add(1)
+		})
+	})
+
+	if counter.Load() != 1 {
+		t.Error("Do() should only have invoked its body once.")
+	}
 }
 
 func Test_Atom_Do_Nesting(t *testing.T) {
