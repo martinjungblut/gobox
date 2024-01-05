@@ -20,6 +20,7 @@ type Portal[T any] struct {
 // across all copies.
 type Atom[T any] struct {
 	state **T
+	group *AtomGroup[T]
 }
 
 // New() creates a new Atom.
@@ -67,17 +68,23 @@ func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	wg.Add(1)
 
 	go func() {
-		locker.Lock()
 		body(portal)
 		wg.Done()
-		locker.Unlock()
 	}()
 
-	reader <- *this.state
+	locker.Lock()
+	previous := *this.state
+	reader <- previous
 	close(reader)
 
-	*this.state = <-writer
+	current := <-writer
+	*this.state = current
 	close(writer)
+
+	if this.group != nil {
+		this.group.DoReadWrite(previous, current)
+	}
+	locker.Unlock()
 
 	wg.Wait()
 }
@@ -88,4 +95,42 @@ func (this Atom[T]) IsAlive() bool {
 
 func (this Atom[T]) IsDead() bool {
 	return *this.state == nil
+}
+
+type AtomGroup[T any] struct {
+	name        string
+	onReadWrite func(string, *T, *T)
+	mutex       sync.Mutex
+}
+
+func NewAtomGroup[T any](name string) AtomGroup[T] {
+	return AtomGroup[T]{
+		name:  name,
+		mutex: sync.Mutex{},
+	}
+}
+
+func (this *AtomGroup[T]) New(value T) Atom[T] {
+	atom := New(value)
+	atom.group = this
+	return atom
+}
+
+func (this *AtomGroup[T]) Dead() Atom[T] {
+	atom := Dead[T]()
+	atom.group = this
+	return atom
+}
+
+func (this *AtomGroup[T]) OnReadWrite(callback func(string, *T, *T)) {
+	this.onReadWrite = callback
+}
+
+func (this *AtomGroup[T]) DoReadWrite(previous *T, current *T) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
+	if this.onReadWrite != nil {
+		this.onReadWrite(this.name, previous, current)
+	}
 }

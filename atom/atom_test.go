@@ -52,7 +52,7 @@ func IncByReference(atom *Atom[Counter]) {
 	})
 }
 
-func Test_IsAlive(t *testing.T) {
+func Test_Atom_IsAlive(t *testing.T) {
 	atom := New(0)
 
 	if !atom.IsAlive() {
@@ -60,7 +60,7 @@ func Test_IsAlive(t *testing.T) {
 	}
 }
 
-func Test_IsDead(t *testing.T) {
+func Test_Atom_IsDead(t *testing.T) {
 	atom := Dead[int]()
 
 	if !atom.IsDead() {
@@ -68,7 +68,7 @@ func Test_IsDead(t *testing.T) {
 	}
 }
 
-func Test_Pointer_Kills(t *testing.T) {
+func Test_Atom_Pointer_Kills(t *testing.T) {
 	number := 10
 	atom := New(&number)
 
@@ -77,7 +77,7 @@ func Test_Pointer_Kills(t *testing.T) {
 	}
 }
 
-func Test_NoCopy(t *testing.T) {
+func Test_Atom_NoCopy(t *testing.T) {
 	atom := New(atomic.Bool{})
 	check := false
 
@@ -94,7 +94,7 @@ func Test_NoCopy(t *testing.T) {
 	}
 }
 
-func Test_Do_Dead(t *testing.T) {
+func Test_Atom_Do_Dead(t *testing.T) {
 	atom := Dead[int]()
 
 	called := false
@@ -110,9 +110,10 @@ func Test_Do_Dead(t *testing.T) {
 	}
 }
 
-func Test_Do_Atomicity(t *testing.T) {
+func Test_Atom_Do_Atomicity(t *testing.T) {
+	cycles := 100000
+
 	atom := New(0)
-	cycles := 1000
 	mutex := &sync.Mutex{}
 
 	Concurrently(cycles, func() {
@@ -131,14 +132,14 @@ func Test_Do_Atomicity(t *testing.T) {
 		value := *pointer
 
 		if value != cycles {
-			t.Errorf("value was '%d', but should have been '%d'.", value, cycles)
+			t.Fatalf("value was '%d', but should have been '%d'.", value, cycles)
 		}
 
 		portal.Writer <- pointer
 	})
 }
 
-func Test_Do_Nesting(t *testing.T) {
+func Test_Atom_Do_Nesting(t *testing.T) {
 	atom := New(0)
 
 	check1, check2, check3 := false, false, false
@@ -187,9 +188,10 @@ func Test_Do_Nesting(t *testing.T) {
 	}
 }
 
-func Test_Do_Reader_Writer(t *testing.T) {
+func Test_Atom_Do_Reader_And_Writer_Are_Automatically_Closed(t *testing.T) {
 	atom := New(0)
 	mutex := &sync.Mutex{}
+	panicked := false
 
 	atom.Do(mutex, func(portal Portal[int]) {
 		pointer := <-portal.Reader
@@ -201,20 +203,31 @@ func Test_Do_Reader_Writer(t *testing.T) {
 		}
 
 		portal.Writer <- pointer
-		// This would panic, as the writer has already been closed.
-		// portal.Writer <- pointer
+
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+
+		// This should panic.
+		portal.Writer <- pointer
 	})
 
 	atom.Do(mutex, func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		if pointer == nil {
-			t.Error("Reading the should not be nil.")
+			t.Error("Pointer should not be nil.")
 		}
 		portal.Writer <- pointer
 	})
+
+	if !panicked {
+		t.Error("Second write should have caused a panic.")
+	}
 }
 
-func Test_Do_Last_Write_Wins(t *testing.T) {
+func Test_Atom_Do_Last_Write_Wins(t *testing.T) {
 	atom := New(0)
 
 	mutexA := &sync.Mutex{}
@@ -239,7 +252,7 @@ func Test_Do_Last_Write_Wins(t *testing.T) {
 	}
 }
 
-func Test_Mutation_Assumptions(t *testing.T) {
+func Test_Atom_Mutation_Assumptions(t *testing.T) {
 	// Observe some truths. IncByReference() should mutate,
 	// IncByValue() should not. These are truths are implied by the
 	// semantics of Go, but the test simply makes them explicitly
@@ -257,7 +270,7 @@ func Test_Mutation_Assumptions(t *testing.T) {
 	}
 }
 
-func Test_Mutation(t *testing.T) {
+func Test_Atom_Mutation(t *testing.T) {
 	atom := New(Counter{Value: 0})
 
 	// Call methods directly inside a Use() block. Regular Go
@@ -323,4 +336,69 @@ func Test_Mutation(t *testing.T) {
 		}
 		portal.Writer <- pointer
 	})
+}
+
+func Test_AtomGroup_Constructors(t *testing.T) {
+	group := NewAtomGroup[int]("integers")
+
+	alive := group.New(10)
+	if !alive.IsAlive() {
+		t.Error("Atom should be alive.")
+	}
+
+	dead := group.Dead()
+	if !dead.IsDead() {
+		t.Error("Atom should be alive.")
+	}
+}
+
+func Test_AtomGroup_OnReadWrite(t *testing.T) {
+	cycles := 100
+
+	group := NewAtomGroup[int]("integers")
+	seqPrevious := make([]int, 0)
+	seqCurrent := make([]int, 0)
+	group.OnReadWrite(func(_ string, previous *int, current *int) {
+		seqPrevious = append(seqPrevious, *previous)
+
+		value := -1
+		if current != nil {
+			value = *current
+		}
+		seqCurrent = append(seqCurrent, value)
+	})
+
+	atom := group.New(0)
+
+	mutex := &sync.Mutex{}
+	Concurrently(cycles, func() {
+		atom.Do(mutex, func(portal Portal[int]) {
+			pointer := <-portal.Reader
+			value := *pointer
+			value++
+			portal.Writer <- &value
+		})
+	})
+
+	assertSequential := func(firstValue int, sequence []int) {
+		if sequence[0] != firstValue {
+			t.Fatalf("First value in sequence doesn't match. Expected: '%d', actual: '%d'.", firstValue, sequence[0])
+		}
+
+		indexMax := len(sequence) - 1
+		index := 0
+		for {
+			if index+1 > indexMax {
+				break
+			}
+
+			if sequence[index+1] != sequence[index]+1 {
+				t.Fatalf("Sequence is not sequential: %v\n", sequence)
+			}
+			index++
+		}
+	}
+
+	assertSequential(0, seqPrevious)
+	assertSequential(1, seqCurrent)
 }
