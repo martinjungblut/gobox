@@ -5,16 +5,6 @@ import (
 	"sync"
 )
 
-// Portal is a communication bridge that facilitates interaction
-// between two distinct parts of the code. It provides a Reader
-// channel for receiving values and a Writer channel for sending
-// values. This allows seamless communication and data exchange
-// between different components or goroutines.
-type Portal[T any] struct {
-	Reader <-chan *T
-	Writer chan<- *T
-}
-
 // Atom is a shared reference; copies of an Atom always refer to the
 // same value, so a modification to any copy implies a state mutation
 // across all copies.
@@ -53,6 +43,16 @@ func Dead[T any]() Atom[T] {
 	return instance
 }
 
+// Do applies a given function to the Atom's value within a
+// synchronized environment;
+// It locks the provided locker, creates a Portal for reading and
+// writing the current and modified values, executes the provided
+// function with the Portal, updates the Atom's state based on the
+// modifications, and releases the lock;
+// If the Atom is dead (has a nil pointer), the function is not
+// executed;
+// Note: The provided locker should be the same for all concurrent
+// operations on the Atom to ensure proper synchronization.
 func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	if this.IsDead() {
 		return
@@ -96,49 +96,4 @@ func (this Atom[T]) IsAlive() bool {
 
 func (this Atom[T]) IsDead() bool {
 	return *this.state == nil
-}
-
-type AtomGroup[T any] struct {
-	name        string
-	onReadWrite func(ReadWriteEvent[T])
-}
-
-func NewAtomGroup[T any](name string) AtomGroup[T] {
-	return AtomGroup[T]{
-		name: name,
-	}
-}
-
-func (this *AtomGroup[T]) New(name string, value T) Atom[T] {
-	atom := New(value)
-	atom.name = &name
-	atom.group = this
-	return atom
-}
-
-func (this *AtomGroup[T]) Dead() Atom[T] {
-	return Dead[T]()
-}
-
-func (this *AtomGroup[T]) OnReadWrite(callback func(ReadWriteEvent[T])) {
-	this.onReadWrite = callback
-}
-
-func (this *AtomGroup[T]) DoReadWrite(name string, previous *T, current *T) {
-	if this.onReadWrite != nil {
-		event := ReadWriteEvent[T]{
-			GroupName: this.name,
-			AtomName:  name,
-			Previous:  previous,
-			Current:   current,
-		}
-		this.onReadWrite(event)
-	}
-}
-
-type ReadWriteEvent[T any] struct {
-	GroupName string
-	AtomName  string
-	Previous  *T
-	Current   *T
 }
