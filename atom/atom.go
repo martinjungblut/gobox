@@ -83,7 +83,7 @@ func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	close(writer)
 
 	if this.group != nil && this.name != nil {
-		this.group.DoReadWrite(*this.name, previous, current)
+		this.group.doReadWrite(*this.name, previous, current)
 	}
 	locker.Unlock()
 

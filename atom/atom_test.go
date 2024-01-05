@@ -52,7 +52,7 @@ func IncByReference(atom *Atom[Counter]) {
 	})
 }
 
-func Test_Atom_IsAlive(t *testing.T) {
+func Test_Atom_New_And_IsAlive(t *testing.T) {
 	atom := New(0)
 
 	if !atom.IsAlive() {
@@ -60,7 +60,7 @@ func Test_Atom_IsAlive(t *testing.T) {
 	}
 }
 
-func Test_Atom_IsDead(t *testing.T) {
+func Test_Atom_Dead_And_IsDead(t *testing.T) {
 	atom := Dead[int]()
 
 	if !atom.IsDead() {
@@ -338,24 +338,28 @@ func Test_Atom_Mutation(t *testing.T) {
 	})
 }
 
-func Test_AtomGroup_Constructors(t *testing.T) {
+func Test_AtomGroup_New_And_IsAlive(t *testing.T) {
 	group := NewAtomGroup[int]("integers")
 
 	alive := group.New("alive", 10)
 	if !alive.IsAlive() {
-		t.Error("Atom should be alive.")
+		t.Error("Should be alive.")
 	}
+}
+
+func Test_AtomGroup_Dead_And_IsDead(t *testing.T) {
+	group := NewAtomGroup[int]("integers")
 
 	dead := group.Dead()
 	if !dead.IsDead() {
-		t.Error("Atom should be alive.")
+		t.Error("Should be dead.")
 	}
 }
 
 func Test_AtomGroup_OnReadWrite(t *testing.T) {
 	cycles := 100
 
-	group := NewAtomGroup[int]("integers")
+	group := NewAtomGroup[int]("group-1")
 	seqPrevious := make([]int, 0)
 	seqCurrent := make([]int, 0)
 
@@ -375,7 +379,7 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 		atomName = event.AtomName
 	})
 
-	atom := group.New("simple-atom", 0)
+	atom := group.New("atom-1", 0)
 
 	mutex := &sync.Mutex{}
 	Concurrently(cycles, func() {
@@ -400,7 +404,7 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 			}
 
 			if sequence[index+1] != sequence[index]+1 {
-				t.Fatalf("Sequence is not sequential: %v\n", sequence)
+				t.Fatalf("Sequence is not sequential: '%v'.", sequence)
 			}
 			index++
 		}
@@ -409,11 +413,11 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 	assertSequential(0, seqPrevious)
 	assertSequential(1, seqCurrent)
 
-	if groupName != "integers" {
-		t.Error("Incorrect group name")
+	if groupName != "group-1" {
+		t.Error("Incorrect group name.")
 	}
 
-	if atomName != "simple-atom" {
-		t.Error("Incorrect group name")
+	if atomName != "atom-1" {
+		t.Error("Incorrect atom name.")
 	}
 }

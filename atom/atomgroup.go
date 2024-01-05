@@ -44,12 +44,12 @@ func (this *AtomGroup[T]) OnReadWrite(callback func(ReadWriteEvent[T])) {
 	this.onReadWrite = callback
 }
 
-// DoReadWrite invokes the OnReadWrite callback function, if set, with
+// doReadWrite invokes the OnReadWrite callback function, if set, with
 // the information about a read-write event within the AtomGroup; It
 // provides details such as the group name, Atom name, previous value,
 // and current value; If no callback is set, this method has no
 // effect.
-func (this *AtomGroup[T]) DoReadWrite(name string, previous *T, current *T) {
+func (this *AtomGroup[T]) doReadWrite(name string, previous *T, current *T) {
 	if this.onReadWrite != nil {
 		event := ReadWriteEvent[T]{
 			GroupName: this.name,
