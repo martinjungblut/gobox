@@ -51,11 +51,16 @@ func Dead[T any]() Atom[T] {
 // modifications, and releases the lock;
 // If the Atom is dead (has a nil pointer), the function is not
 // executed;
+// If the function is executed, Do returns true, else it returns
+// false.
 // Note: The provided locker should be the same for all concurrent
 // operations on the Atom to ensure proper synchronization.
-func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
+func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) bool {
+	locker.Lock()
+	defer locker.Unlock()
+
 	if this.IsDead() {
-		return
+		return false
 	}
 
 	reader := make(chan *T)
@@ -73,7 +78,6 @@ func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 		wg.Done()
 	}()
 
-	locker.Lock()
 	previous := *this.state
 	reader <- previous
 	close(reader)
@@ -85,15 +89,15 @@ func (this Atom[T]) Do(locker sync.Locker, body func(Portal[T])) {
 	if this.group != nil && this.name != nil {
 		this.group.doReadWrite(*this.name, previous, current)
 	}
-	locker.Unlock()
 
 	wg.Wait()
+	return true
 }
 
 func (this Atom[T]) IsAlive() bool {
-	return *this.state != nil
+	return this.state != nil && *this.state != nil
 }
 
 func (this Atom[T]) IsDead() bool {
-	return *this.state == nil
+	return this.state == nil || *this.state == nil
 }

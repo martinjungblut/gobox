@@ -77,6 +77,14 @@ func Test_Atom_Pointer_Kills(t *testing.T) {
 	}
 }
 
+func Test_Atom_ZeroValue_Kills(t *testing.T) {
+	var atom Atom[int]
+
+	if !atom.IsDead() {
+		t.Error("Should be dead.")
+	}
+}
+
 func Test_Atom_NoCopy(t *testing.T) {
 	atom := New(atomic.Bool{})
 	check := false
@@ -127,18 +135,27 @@ func Test_Atom_Do_Dead_Atomicity(t *testing.T) {
 	atom := New(0)
 	mutex := &sync.Mutex{}
 
-	counter := atomic.Int64{}
+	callCounter := atomic.Int64{}
+	successCounter := atomic.Int64{}
 
 	Concurrently(100000, func() {
-		atom.Do(mutex, func(portal Portal[int]) {
+		successful := atom.Do(mutex, func(portal Portal[int]) {
 			<-portal.Reader
 			portal.Writer <- nil
-			counter.Add(1)
+			callCounter.Add(1)
 		})
+
+		if successful {
+			successCounter.Add(1)
+		}
 	})
 
-	if counter.Load() != 1 {
+	if callCounter.Load() != 1 {
 		t.Error("Do() should only have invoked its body once.")
+	}
+
+	if successCounter.Load() != 1 {
+		t.Error("Do() should have been successful only once.")
 	}
 }
 
