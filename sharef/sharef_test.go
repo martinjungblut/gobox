@@ -1,11 +1,28 @@
-package atom
+package sharef
 
 import (
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 )
+
+func AssertPanic(body func(), message string, t *testing.T) {
+	panicked := false
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+
+		body()
+	}()
+
+	if !panicked {
+		t.Fatal(message)
+	}
+}
 
 func Concurrently(times int, handler func()) {
 	maxprocs := runtime.NumCPU() + 1
@@ -36,80 +53,71 @@ func (this Counter) IncByValue() {
 	this.Value++
 }
 
-func IncByValue(atom Atom[Counter]) {
-	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+func IncByValue(sharef Sharef[Counter]) {
+	sharef.Do(func(portal Portal[Counter]) {
 		counter := <-portal.Reader
 		counter.IncByReference()
 		portal.Writer <- counter
 	})
 }
 
-func IncByReference(atom *Atom[Counter]) {
-	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+func IncByReference(sharef *Sharef[Counter]) {
+	sharef.Do(func(portal Portal[Counter]) {
 		counter := <-portal.Reader
 		counter.IncByReference()
 		portal.Writer <- counter
 	})
 }
 
-func Test_Atom_New_And_IsAlive(t *testing.T) {
-	atom := New(0)
-
-	if !atom.IsAlive() {
-		t.Error("Should be alive.")
-	}
+func Test_Sharef_New(t *testing.T) {
+	New(0)
 }
 
-func Test_Atom_Dead_And_IsDead(t *testing.T) {
-	atom := Dead[int]()
-
-	if !atom.IsDead() {
-		t.Error("Should be dead.")
-	}
+func Test_Sharef_New_Pointer_Panics(t *testing.T) {
+	AssertPanic(func() {
+		number := 10
+		New(&number)
+	}, "Pointer should have caused a panic.", t)
 }
 
-func Test_Atom_Pointer_Kills(t *testing.T) {
-	number := 10
-	atom := New(&number)
+func Test_Sharef_Do_ZeroValue_Panics(t *testing.T) {
+	AssertPanic(func() {
+		var sharef Sharef[int]
 
-	if !atom.IsDead() {
-		t.Error("Should be dead.")
-	}
+		sharef.Do(func(portal Portal[int]) {
+			ptr := <-portal.Reader
+			portal.Writer <- ptr
+		})
+	}, "Zero value should have caused a panic.", t)
 }
 
-func Test_Atom_ZeroValue_Kills(t *testing.T) {
-	var atom Atom[int]
+func Test_Sharef_Do_Nil_Panics(t *testing.T) {
+	sharef := New(0)
 
-	if !atom.IsDead() {
-		t.Error("Should be dead.")
-	}
-}
-
-func Test_Atom_NoCopy(t *testing.T) {
-	atom := New(atomic.Bool{})
-	check := false
-
-	atom.Do(&sync.Mutex{}, func(portal Portal[atomic.Bool]) {
-		boolean := <-portal.Reader
-		boolean.Store(true)
-
-		portal.Writer <- boolean
-		check = true
+	sharef.Do(func(portal Portal[int]) {
+		<-portal.Reader
+		portal.Writer <- nil
 	})
 
-	if !check {
-		t.Error("Check failed.")
-	}
+	AssertPanic(func() {
+		sharef.Do(func(portal Portal[int]) {
+			ptr := <-portal.Reader
+			portal.Writer <- ptr
+		})
+	}, "Nil value should have caused a panic.", t)
 }
 
-func Test_Atom_Do_Atomicity(t *testing.T) {
+func Test_Sharef_Do_Atomicity(t *testing.T) {
 	cycles := 100000
 
-	atom := New(0)
+	sharef := New(0)
 	mutex := &sync.Mutex{}
 
 	Concurrently(cycles, func() {
-		atom.Do(mutex, func(portal Portal[int]) {
+		mutex.Lock()
+		defer mutex.Unlock()
+
+		sharef.Do(func(portal Portal[int]) {
 			pointer := <-portal.Reader
 
 			value := *pointer
@@ -119,7 +127,7 @@ func Test_Atom_Do_Atomicity(t *testing.T) {
 		})
 	})
 
-	atom.Do(mutex, func(portal Portal[int]) {
+	sharef.Do(func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		value := *pointer
 
@@ -131,46 +139,16 @@ func Test_Atom_Do_Atomicity(t *testing.T) {
 	})
 }
 
-func Test_Atom_Do_Dead_Atomicity(t *testing.T) {
-	atom := New(0)
-	mutex := &sync.Mutex{}
-
-	callCounter := atomic.Int64{}
-	successCounter := atomic.Int64{}
-
-	Concurrently(100000, func() {
-		successful := atom.Do(mutex, func(portal Portal[int]) {
-			<-portal.Reader
-			portal.Writer <- nil
-			callCounter.Add(1)
-		})
-
-		if successful {
-			successCounter.Add(1)
-		}
-	})
-
-	if callCounter.Load() != 1 {
-		t.Error("Do() should only have invoked its body once.")
-	}
-
-	if successCounter.Load() != 1 {
-		t.Error("Do() should have been successful only once.")
-	}
-}
-
-func Test_Atom_Do_Nesting(t *testing.T) {
-	atom := New(0)
+func Test_Sharef_Do_Nesting(t *testing.T) {
+	sharef := New(0)
 
 	check1, check2, check3 := false, false, false
-	mutexA := &sync.Mutex{}
-	mutexB := &sync.Mutex{}
 
-	atom.Do(mutexA, func(portalA Portal[int]) {
+	sharef.Do(func(portalA Portal[int]) {
 		pointerA := <-portalA.Reader
 		*pointerA++
 
-		atom.Do(mutexB, func(portalB Portal[int]) {
+		sharef.Do(func(portalB Portal[int]) {
 			pointerB := <-portalB.Reader
 			*pointerB++
 
@@ -182,7 +160,7 @@ func Test_Atom_Do_Nesting(t *testing.T) {
 		portalA.Writer <- pointerA
 	})
 
-	atom.Do(mutexA, func(portal Portal[int]) {
+	sharef.Do(func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		portal.Writer <- pointer
 
@@ -208,12 +186,11 @@ func Test_Atom_Do_Nesting(t *testing.T) {
 	}
 }
 
-func Test_Atom_Do_Reader_And_Writer_Are_Automatically_Closed(t *testing.T) {
-	atom := New(0)
-	mutex := &sync.Mutex{}
+func Test_Sharef_Do_Reader_And_Writer_Are_Automatically_Closed(t *testing.T) {
+	sharef := New(0)
 	panicked := false
 
-	atom.Do(mutex, func(portal Portal[int]) {
+	sharef.Do(func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		if pointer == nil {
 			t.Error("Reading the first time should not be nil.")
@@ -234,7 +211,7 @@ func Test_Atom_Do_Reader_And_Writer_Are_Automatically_Closed(t *testing.T) {
 		portal.Writer <- pointer
 	})
 
-	atom.Do(mutex, func(portal Portal[int]) {
+	sharef.Do(func(portal Portal[int]) {
 		pointer := <-portal.Reader
 		if pointer == nil {
 			t.Error("Pointer should not be nil.")
@@ -247,14 +224,12 @@ func Test_Atom_Do_Reader_And_Writer_Are_Automatically_Closed(t *testing.T) {
 	}
 }
 
-func Test_Atom_Do_Last_Write_Wins(t *testing.T) {
-	atom := New(0)
+func Test_Sharef_Do_Last_Write_Wins(t *testing.T) {
+	sharef := New(0)
+	ten := 10
 
-	mutexA := &sync.Mutex{}
-	mutexB := &sync.Mutex{}
-
-	atom.Do(mutexA, func(portalA Portal[int]) {
-		atom.Do(mutexB, func(portalB Portal[int]) {
+	sharef.Do(func(portalA Portal[int]) {
+		sharef.Do(func(portalB Portal[int]) {
 			pointerB := <-portalB.Reader
 			*pointerB++
 			portalB.Writer <- pointerB
@@ -264,15 +239,21 @@ func Test_Atom_Do_Last_Write_Wins(t *testing.T) {
 		if *pointerA != 1 {
 			t.Errorf("Value should be 1, but instead it was: '%d'.", *pointerA)
 		}
-		portalA.Writer <- nil
+		portalA.Writer <- &ten
 	})
 
-	if !atom.IsDead() {
-		t.Error("Should be dead.")
-	}
+	sharef.Do(func(portal Portal[int]) {
+		pointer := <-portal.Reader
+
+		if *pointer != 10 {
+			t.Errorf("Value should be 10, but instead it was: '%d'.", *pointer)
+		}
+
+		portal.Writer <- pointer
+	})
 }
 
-func Test_Atom_Mutation_Assumptions(t *testing.T) {
+func Test_Sharef_Mutation_Assumptions(t *testing.T) {
 	// Observe some truths. IncByReference() should mutate,
 	// IncByValue() should not. These are truths are implied by the
 	// semantics of Go, but the test simply makes them explicitly
@@ -290,12 +271,12 @@ func Test_Atom_Mutation_Assumptions(t *testing.T) {
 	}
 }
 
-func Test_Atom_Mutation(t *testing.T) {
-	atom := New(Counter{Value: 0})
+func Test_Sharef_Mutation(t *testing.T) {
+	sharef := New(Counter{Value: 0})
 
 	// Call methods directly inside a Use() block. Regular Go
 	// semantics apply.
-	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	sharef.Do(func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 
 		// Value becomes 1.
@@ -314,11 +295,11 @@ func Test_Atom_Mutation(t *testing.T) {
 		portal.Writer <- pointer
 	})
 
-	// Call methods inside another function that received the
-	// Atom as a copy.
+	// Call methods inside another function that received the Sharef
+	// as a copy.
 	// Value becomes 2.
-	IncByValue(atom)
-	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	IncByValue(sharef)
+	sharef.Do(func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 2 {
 			t.Error("Function IncByValue() performed no mutation.")
@@ -326,11 +307,11 @@ func Test_Atom_Mutation(t *testing.T) {
 		portal.Writer <- pointer
 	})
 
-	// Call methods inside another function that received the
-	// Atom by reference.
+	// Call methods inside another function that received the Sharef
+	// by reference.
 	// Value becomes 3.
-	IncByReference(&atom)
-	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	IncByReference(&sharef)
+	sharef.Do(func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 3 {
 			t.Error("Function IncByReference() performed no mutation.")
@@ -338,18 +319,18 @@ func Test_Atom_Mutation(t *testing.T) {
 		portal.Writer <- pointer
 	})
 
-	func(copy Atom[Counter]) {
+	func(copy Sharef[Counter]) {
 		// Do() on a local copy named 'copy'. Mutates.
 		// Value becomes 4.
-		copy.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+		copy.Do(func(portal Portal[Counter]) {
 			pointer := <-portal.Reader
 			pointer.Value++
 			portal.Writer <- pointer
 		})
-	}(atom)
+	}(sharef)
 
-	// We can see the original 'atom' was mutated here.
-	atom.Do(&sync.Mutex{}, func(portal Portal[Counter]) {
+	// We can see the original 'sharef' was mutated here.
+	sharef.Do(func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 4 {
 			t.Error("Do() performed no mutations.")
@@ -358,33 +339,24 @@ func Test_Atom_Mutation(t *testing.T) {
 	})
 }
 
-func Test_AtomGroup_New_And_IsAlive(t *testing.T) {
-	group := NewAtomGroup[int]("integers")
+func Test_Group_New_Pointer_Panics(t *testing.T) {
+	AssertPanic(func() {
+		x := 10
 
-	alive := group.New("alive", 10)
-	if !alive.IsAlive() {
-		t.Error("Should be alive.")
-	}
+		group := NewGroup[*int]("integers")
+		group.New("foo", &x)
+	}, "Pointer should have caused a panic.", t)
 }
 
-func Test_AtomGroup_Dead_And_IsDead(t *testing.T) {
-	group := NewAtomGroup[int]("integers")
-
-	dead := group.Dead()
-	if !dead.IsDead() {
-		t.Error("Should be dead.")
-	}
-}
-
-func Test_AtomGroup_OnReadWrite(t *testing.T) {
+func Test_Group_OnReadWrite(t *testing.T) {
 	cycles := 100
 
-	group := NewAtomGroup[int]("group-1")
+	group := NewGroup[int]("group-1")
 	seqPrevious := make([]int, 0)
 	seqCurrent := make([]int, 0)
 
 	groupName := ""
-	atomName := ""
+	sharefName := ""
 
 	group.OnReadWrite(func(event ReadWriteEvent[int]) {
 		seqPrevious = append(seqPrevious, *event.Previous)
@@ -396,14 +368,17 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 		seqCurrent = append(seqCurrent, value)
 
 		groupName = event.GroupName
-		atomName = event.AtomName
+		sharefName = event.SharefName
 	})
 
-	atom := group.New("atom-1", 0)
-
+	sharef := group.New("sharef-1", 0)
 	mutex := &sync.Mutex{}
+
 	Concurrently(cycles, func() {
-		atom.Do(mutex, func(portal Portal[int]) {
+		mutex.Lock()
+		defer mutex.Unlock()
+
+		sharef.Do(func(portal Portal[int]) {
 			pointer := <-portal.Reader
 			value := *pointer
 			value++
@@ -437,7 +412,7 @@ func Test_AtomGroup_OnReadWrite(t *testing.T) {
 		t.Error("Incorrect group name.")
 	}
 
-	if atomName != "atom-1" {
-		t.Error("Incorrect atom name.")
+	if sharefName != "sharef-1" {
+		t.Error("Incorrect sharef name.")
 	}
 }
