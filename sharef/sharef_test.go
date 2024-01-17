@@ -328,11 +328,30 @@ func Test_Sharef_Mutation(t *testing.T) {
 			portal.Writer <- pointer
 		})
 	}(sharef)
-
 	// We can see the original 'sharef' was mutated here.
 	sharef.Do(func(portal Portal[Counter]) {
 		pointer := <-portal.Reader
 		if pointer.Value != 4 {
+			t.Error("Do() performed no mutations.")
+		}
+		portal.Writer <- pointer
+	})
+
+	// Call methods inside another function that received a copy of
+	// the original Sharef by reference.
+	// We want to ensure the same properties that apply to Sharef
+	// (that any copy of a Sharef references the same underlying data)
+	// also apply to *Sharef.
+	// Value becomes 5.
+	copy := sharef
+	pointerToCopy := &copy
+	if pointerToCopy == &sharef {
+		t.Error("Copy failed.")
+	}
+	IncByReference(pointerToCopy)
+	sharef.Do(func(portal Portal[Counter]) {
+		pointer := <-portal.Reader
+		if pointer.Value != 5 {
 			t.Error("Do() performed no mutations.")
 		}
 		portal.Writer <- pointer
